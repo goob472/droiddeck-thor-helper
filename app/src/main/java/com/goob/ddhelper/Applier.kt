@@ -17,10 +17,14 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
 
     private val STEAM_APPS = listOf("UserLocalConfigStore", "Software", "Valve", "Steam", "apps")
 
-    private fun stateFile(game: Game) = File(File(ctx.filesDir, "applied").apply { mkdirs() }, "${game.id}.json")
+    /** settings keep the original file name so state from older versions still reverts. */
+    private fun stateFile(game: Game, kind: String) = File(
+        File(ctx.filesDir, "applied").apply { mkdirs() },
+        if (kind == Pack.SETTINGS) "${game.id}.json" else "${game.id}.$kind.json",
+    )
 
-    fun appliedState(game: Game): JSONObject? =
-        stateFile(game).takeIf { it.isFile }?.let { runCatching { JSONObject(it.readText()) }.getOrNull() }
+    fun appliedState(game: Game, kind: String = Pack.SETTINGS): JSONObject? =
+        stateFile(game, kind).takeIf { it.isFile }?.let { runCatching { JSONObject(it.readText()) }.getOrNull() }
 
     private fun fail(msg: String): Nothing = throw IllegalStateException(msg)
 
@@ -46,34 +50,37 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         log("Backups: ${dir.absolutePath}")
     }
 
-    fun apply(game: Game) {
+    fun apply(game: Game, pack: Pack) {
+        if (pack.manual != null) fail("${pack.name} has to be changed inside the game.")
         if (!Root.available()) fail("Root access was denied.")
         stopDroidDeck()
         backup(listOf(dd.envFile) + dd.localConfigs())
-        if (appliedState(game) != null) {
-            log("A profile is already applied. Reverting it first so the new one starts from your own settings.")
-            revertInternal(game)
+        if (appliedState(game, pack.kind) != null) {
+            log("${pack.name} is already applied. Reverting it first so it starts from your own settings.")
+            revertInternal(game, pack.kind)
         }
         val state = JSONObject()
-            .put("game", game.id).put("profile", game.profile.name).put("pkg", dd.pkg)
+            .put("game", game.id).put("kind", pack.kind).put("profile", pack.name).put("pkg", dd.pkg)
             .put("appliedAt", System.currentTimeMillis())
         val scope = game.steamAppId.toString()
 
         // 1. Per-game environment (FEX preset + fixes).
+        val entries = pack.env
+        if (entries.isNotEmpty()) {
         val envText = Root.readText(ctx, dd.envFile)
         if (envText == null) log("No game-environment.json yet; creating one.")
         val env = EnvFile.parseOrNew(envText)
-        val entries = GameDb.environment(game)
         val prev = EnvFile.apply(env, scope, entries)
         write(dd.envFile, EnvFile.encode(env))
         state.put("env", JSONObject().apply { prev.forEach { (k, p) -> put(k, p.toJson()) } })
         entries.forEach { (k, v) -> log("  env $k = ${v ?: "(unset)"}") }
         log("Wrote per-game environment for app $scope.")
+        }
         // Save progress now so a failure later can still be reverted.
-        stateFile(game).writeText(state.toString(2))
+        stateFile(game, pack.kind).writeText(state.toString(2))
 
         // 2. Steam launch options.
-        if (game.launchOptions != null) {
+        if (pack.launchOptions != null) {
             val configs = dd.localConfigs()
             if (configs.isEmpty()) log("No Steam localconfig.vdf found. Sign in to Steam in DroidDeck once, then apply again to set launch options.")
             val launch = JSONObject()
@@ -81,7 +88,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                 val text = Root.readText(ctx, cfg) ?: continue
                 val path = STEAM_APPS + scope
                 val old = Vdf.get(text, path, "LaunchOptions")
-                val merged = mergeLaunchOptions(old, game.launchOptions)
+                val merged = mergeLaunchOptions(old, pack.launchOptions)
                 val updated = Vdf.set(text, path, 4, "LaunchOptions", merged)
                 if (updated == null) {
                     log("Skipped $cfg (unexpected layout)."); continue
@@ -91,15 +98,17 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                 log("Launch options: \"$merged\" (${cfg.substringAfter("/userdata/").substringBefore('/')})")
             }
             state.put("launch", launch)
-            stateFile(game).writeText(state.toString(2))
+            stateFile(game, pack.kind).writeText(state.toString(2))
         }
 
         // 3. Game-file tweaks.
-        val install = dd.findInstall(game.steamAppId, game.installDir)
-        if (install == null) log("${game.name} is not installed in any Steam library DroidDeck uses. Skipping game-file tweaks.")
-        else log("Found ${game.name} at ${install.gameDir}")
+        val install = if (pack.tweaks.isEmpty()) null else dd.findInstall(game.steamAppId, game.installDir)
+        if (pack.tweaks.isNotEmpty()) {
+            if (install == null) log("${game.name} is not installed in any Steam library DroidDeck uses. Skipping game-file tweaks.")
+            else log("Found ${game.name} at ${install.gameDir}")
+        }
         val tweaksState = JSONObject()
-        for (t in game.tweaks) {
+        for (t in pack.tweaks) {
             if (install == null) break
             try {
                 when (t.type) {
@@ -112,12 +121,12 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                 log("Tweak '${t.name}' failed: ${e.message}")
             }
             state.put("tweaks", tweaksState)
-            stateFile(game).writeText(state.toString(2))
+            stateFile(game, pack.kind).writeText(state.toString(2))
         }
         state.put("tweaks", tweaksState)
         if (install != null) state.put("install", install.gameDir).put("prefix", install.prefix ?: JSONObject.NULL)
-        stateFile(game).writeText(state.toString(2))
-        log("Done. Open DroidDeck and launch ${game.name}. The changes apply from the next game launch.")
+        stateFile(game, pack.kind).writeText(state.toString(2))
+        log("Done: ${pack.name} applied. Open DroidDeck and launch ${game.name}. The changes apply from the next game launch.")
     }
 
     private fun renameFiles(install: DroidDeck.Install, t: Tweak): JSONObject {
@@ -199,17 +208,17 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         return JSONObject().put("regPath", path).put("key", key).put("prev", prev)
     }
 
-    fun revert(game: Game) {
+    fun revert(game: Game, pack: Pack) {
         if (!Root.available()) fail("Root access was denied.")
-        if (appliedState(game) == null) fail("Nothing has been applied for ${game.name}.")
+        if (appliedState(game, pack.kind) == null) fail("${pack.name} isn't applied for ${game.name}.")
         stopDroidDeck()
         backup(listOf(dd.envFile) + dd.localConfigs())
-        revertInternal(game)
-        log("Reverted ${game.name} to your previous settings.")
+        revertInternal(game, pack.kind)
+        log("Reverted ${pack.name} for ${game.name}.")
     }
 
-    private fun revertInternal(game: Game) {
-        val state = appliedState(game) ?: return
+    private fun revertInternal(game: Game, kind: String) {
+        val state = appliedState(game, kind) ?: return
         val scope = game.steamAppId.toString()
 
         state.optJSONObject("tweaks")?.let { tweaks ->
@@ -269,7 +278,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
             write(dd.envFile, EnvFile.encode(env))
             log("  restored per-game environment")
         }
-        stateFile(game).delete()
+        stateFile(game, kind).delete()
     }
 
     /** Human-readable summary of what DroidDeck currently has for the game. */
@@ -294,7 +303,8 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         val install = dd.findInstall(game.steamAppId, game.installDir)
         sb.appendLine("Install: " + (install?.gameDir ?: "not found"))
         if (install != null) sb.appendLine("Proton prefix: " + (install.prefix ?: "not created yet (launch once)"))
-        sb.appendLine("Helper profile: " + if (appliedState(game) != null) "APPLIED" else "not applied")
+        sb.appendLine("Best settings: " + if (appliedState(game) != null) "APPLIED" else "not applied")
+        game.ui?.let { sb.appendLine("UI mod: " + if (it.manual != null) "in-game only" else if (appliedState(game, Pack.UI) != null) "APPLIED" else "not applied") }
         return sb.toString().trimEnd()
     }
 

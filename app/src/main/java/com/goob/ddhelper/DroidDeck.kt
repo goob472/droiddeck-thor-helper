@@ -66,6 +66,27 @@ class DroidDeck(val pkg: String, val versionName: String?) {
         return null
     }
 
+    /**
+     * The game's library art from Steam's own cache inside DroidDeck: the portrait capsule if there is
+     * one, otherwise the header. Handles both the per-app folder layout and the older flat one.
+     */
+    fun findArt(appId: Long): String? {
+        val dirs = steamRoots.joinToString(" ") { Root.q("$it/appcache/librarycache") }
+        val script = """
+            for d in $dirs; do
+              [ -d "${'$'}d" ] || continue
+              for pat in library_600x900 library_capsule header; do
+                f=${'$'}(find "${'$'}d/$appId" -name "${'$'}pat*.jpg" 2>/dev/null | head -n 1)
+                [ -n "${'$'}f" ] && { echo "${'$'}f"; exit 0; }
+                [ -f "${'$'}d/${appId}_${'$'}pat.jpg" ] && { echo "${'$'}d/${appId}_${'$'}pat.jpg"; exit 0; }
+              done
+            done
+            exit 1
+        """.trimIndent()
+        val r = Root.run(script)
+        return r.out.trim().lineSequence().firstOrNull()?.takeIf { r.ok && it.isNotEmpty() }
+    }
+
     /** userdata/<account>/config/localconfig.vdf for every signed-in account under both Steam clients. */
     fun localConfigs(): List<String> = steamRoots.flatMap { sr ->
         Root.list("$sr/userdata").filter { it.all(Char::isDigit) && it != "0" }

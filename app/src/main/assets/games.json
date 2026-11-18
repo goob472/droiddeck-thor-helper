@@ -67,6 +67,23 @@
           "FEX_SMCCHECKS": "full",
           "FEX_HIDEHYPERVISORBIT": "1"
         }
+      },
+      "ui": {
+        "name": "UI scale 125%",
+        "description": "Sets Unreal Engine's ApplicationScale to 1.25 in Engine.ini. That scales every menu, HUD element and subtitle by 25% on top of the engine's own DPI scaling. Values much higher can push HUD elements off the edges.",
+        "tweaks": [
+          {
+            "id": "ue4_app_scale",
+            "name": "ApplicationScale=1.25",
+            "type": "iniMerge",
+            "path": "pfx:drive_c/users/steamuser/AppData/Local/Maneater/Saved/Config/WindowsNoEditor/Engine.ini",
+            "sections": {
+              "/Script/Engine.UserInterfaceSettings": {
+                "ApplicationScale": "1.25"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -132,7 +149,12 @@
             }
           }
         }
-      ]
+      ],
+      "ui": {
+        "name": "UI scale (in-game only)",
+        "description": "Monster Hunter: World has no UI scale setting that can be changed from outside the game.",
+        "manual": "Monster Hunter: World has no UI or font scale in its config files. Its text and HUD size settings live inside the encrypted save, which this app won't touch, and its Steam Deck patch (15.20) added no UI changes. To make it easier to read on the Thor:\n\n• Start menu > Options > Game Settings > Text Size: set it to the largest size (subtitles and dialogue).\n• Options > Display: raise the HUD-related sizes where offered.\n• The Best settings button already sets 720p, which keeps the UI proportionally the same size but makes the game easier to run."
+      }
     },
     {
       "id": "hitman_woa",
@@ -177,7 +199,14 @@
             "SuperSampling": 750
           }
         }
-      ]
+      ],
+      "ui": {
+        "name": "Handheld UI (Steam Deck mode)",
+        "description": "Sets SteamDeck=1 for this game. HITMAN has a built-in small-display mode for handhelds: interaction prompts twice the default size, larger HUD and menu text (24 vs 12, 22 vs 14), and action prompts, objectives and waypoints scaled ×1.2–1.5. Side effects: the game may show Steam Deck button prompts, and Steam's on-screen keyboard can pop up in text fields.",
+        "env": {
+          "SteamDeck": "1"
+        }
+      }
     }
   ]
 }

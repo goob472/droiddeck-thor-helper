@@ -105,5 +105,11 @@ object Root {
 
     fun rename(from: String, to: String) = run("mv -f ${q(from)} ${q(to)}")
 
+    /** Copies a root-only file into this app's own storage so it can be read without root. */
+    fun copyOut(path: String, dest: File): Boolean {
+        dest.parentFile?.mkdirs()
+        return run("cat ${q(path)} > ${q(dest.absolutePath)} && chmod 0644 ${q(dest.absolutePath)}").ok && dest.length() > 0
+    }
+
     fun copy(from: String, to: String) = run("mkdir -p ${q(File(to).parent!!)} && cp -p ${q(from)} ${q(to)}")
 }

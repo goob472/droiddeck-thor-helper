@@ -53,4 +53,23 @@ class WineRegTest {
         assertEquals("nodxr", GameDb.environment(hitman)["VKD3D_CONFIG"])
         assertEquals(key, hitman.tweaks.single().json.getString("key"))
     }
+
+    @Test fun uiPacksParseAndStaySeparateFromSettings() {
+        val games = GameDb.parse(File("src/main/assets/games.json").readText()).associateBy { it.id }
+        val maneaterUi = games.getValue("maneater").ui!!
+        assertEquals(Pack.UI, maneaterUi.kind)
+        assertTrue(maneaterUi.env.isEmpty())
+        val sec = maneaterUi.tweaks.single().json.getJSONObject("sections").getJSONObject("/Script/Engine.UserInterfaceSettings")
+        assertEquals("1.25", sec.getString("ApplicationScale"))
+        assertTrue(games.getValue("mhw").ui!!.manual!!.contains("Text Size"))
+        val hitmanUi = games.getValue("hitman_woa").ui!!
+        assertEquals(mapOf("SteamDeck" to "1"), hitmanUi.env)
+        // The UI pack must never touch a key the settings pack owns, or reverting one would undo the other.
+        for (g in games.values) {
+            val ui = g.ui ?: continue
+            assertTrue(g.id, (ui.env.keys intersect g.settings.env.keys).isEmpty())
+            assertNull(ui.launchOptions)
+            assertEquals(Pack.SETTINGS, g.settings.kind)
+        }
+    }
 }
