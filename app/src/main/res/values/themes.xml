@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.DDHelper" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#4FC3F7</item>
+        <item name="colorOnPrimary">#00222E</item>
+        <item name="android:windowBackground">#0E1418</item>
+        <item name="android:statusBarColor">#0E1418</item>
+    </style>
+</resources>
