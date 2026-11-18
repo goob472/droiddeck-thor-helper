@@ -68,6 +68,116 @@
           "FEX_HIDEHYPERVISORBIT": "1"
         }
       }
+    },
+    {
+      "id": "mhw",
+      "name": "Monster Hunter: World",
+      "steamAppId": 582010,
+      "installDir": "Monster Hunter World",
+      "summary": "MT Framework, Direct3D 11/12, no Denuvo since June 2021. Very CPU-heavy, so x86 translation is the main bottleneck on the Thor.",
+      "notes": [
+        "FEX uses DroidDeck's Performance + TSO preset. MT Framework spreads work over many threads, and without main TSO they can deadlock or corrupt state under translation. Vector and memcpy TSO stay off, and multiblock stays on, for speed.",
+        "DirectX 12 is turned off so the game runs through DXVK. ProtonDB players report DX11 on Proton is clearly faster than DX12, and DXVK is the most mature path on Turnip.",
+        "graphics_option.ini is set to 1280x720 at a 30 fps cap with the heavy effects off: volumetrics, SSR, water reflection, subsurface scattering, AO, snow, motion blur and depth of field. FidelityFX CAS sharpens the 720p image. The game writes this file on its first launch, so if it's missing, launch once, quit, and apply again.",
+        "If the game says a DX11 call is invalid after a Steam Cloud sync from a Windows PC, use 'Restore Default Settings' in the game's display options once, then apply here again.",
+        "The first hunt in a new area can stutter while DXVK builds shaders. It smooths out after that.",
+        "You can raise the frame cap later in Display settings (FrameRate=60), but under FEX the CPU usually can't hold 60 in towns or big fights."
+      ],
+      "env": {},
+      "profile": {
+        "name": "Best compatibility + performance",
+        "description": "FEX Performance + TSO, DX11 through DXVK, and a handheld 720p/30 graphics profile.",
+        "fex": {
+          "FEX_TSOENABLED": "1",
+          "FEX_VECTORTSOENABLED": "0",
+          "FEX_MEMCPYSETTSOENABLED": "0",
+          "FEX_HALFBARRIERTSOENABLED": "0",
+          "FEX_X87REDUCEDPRECISION": "1",
+          "FEX_MULTIBLOCK": "1"
+        }
+      },
+      "tweaks": [
+        {
+          "id": "mhw_graphics",
+          "name": "Handheld graphics_option.ini (DX11, 720p, 30 fps, light effects)",
+          "type": "iniMerge",
+          "requireExisting": true,
+          "path": "game:graphics_option.ini",
+          "sections": {
+            "GraphicsOption": {
+              "DirectX12Enable": "Off",
+              "Resolution": "1280x720",
+              "FrameRate": "30",
+              "V-Sync": "Off",
+              "OptionMode": "Manual",
+              "AmbientOcclusion": "Off",
+              "VolumeRenderingQuality": "Off",
+              "ShadowQuality": "Low",
+              "Anti-Aliasing": "FXAA",
+              "LODBias": "Low",
+              "FoliageSway": "Off",
+              "SubSurfaceScattering": "Off",
+              "ScreenSpaceReflection": "Off",
+              "WaterReflection": "Off",
+              "SHDiffuse": "Low",
+              "SnowQuality": "Low",
+              "MotionBlur": "Off",
+              "Depth of Field": "Off",
+              "CapsuleAO": "Off",
+              "ContactShadow": "Off",
+              "Anisotropic_Filtering": "Mid",
+              "FidelityFX CAS": "On",
+              "CAS_Sharpness": "0.6",
+              "NVIDIA DLSS": "Off"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "hitman_woa",
+      "name": "HITMAN World of Assassination",
+      "steamAppId": 1659040,
+      "installDir": "HITMAN 3",
+      "summary": "Glacier 2, Direct3D 12 only (runs through VKD3D-Proton), no Denuvo. Has a separate launcher, and ray tracing is the main cause of freezes under Proton.",
+      "notes": [
+        "-skip_launcher goes straight into the game. On Proton the IOI launcher often fails, or doesn't take controller input, and several ProtonDB players say the game would not start without it.",
+        "VKD3D_CONFIG=nodxr hides DirectX Raytracing from the game. ProtonDB reports consistently tie freezes within minutes of starting a mission to ray tracing, and the Adreno 740 can't afford it anyway.",
+        "VKD3D_FRAME_RATE=30 caps the game at a steady 30 fps. Several players found that capping the frame rate cut down hard freezes on loads and picture-in-picture, and under FEX the Thor won't hold much more in big levels like Marrakesh or Mumbai. Remove it in DroidDeck's Game environment if you want to experiment.",
+        "FEX uses DroidDeck's Performance + TSO preset. Glacier is heavily multithreaded and needs main TSO to avoid deadlocks.",
+        "Render scale is set to 75% through the game's SuperSampling registry value. This only works after the game has run once, so launch once, quit, and apply again if the log says the value isn't set yet. Changing graphics in the game can reset it.",
+        "Set graphics to Low or Medium in the game's options, with ray tracing off and no frame generation. The first mission load compiles shaders and takes a while.",
+        "Progression needs IOI's servers. If you get disconnected mid-mission, use Retry. Offline saves are separate from online ones."
+      ],
+      "launchOptions": "%command% -skip_launcher",
+      "env": {
+        "VKD3D_CONFIG": "nodxr",
+        "VKD3D_FRAME_RATE": "30"
+      },
+      "profile": {
+        "name": "Best compatibility + performance",
+        "description": "FEX Performance + TSO, ray tracing hidden, 30 fps cap, launcher skipped, 75% render scale.",
+        "fex": {
+          "FEX_TSOENABLED": "1",
+          "FEX_VECTORTSOENABLED": "0",
+          "FEX_MEMCPYSETTSOENABLED": "0",
+          "FEX_HALFBARRIERTSOENABLED": "0",
+          "FEX_X87REDUCEDPRECISION": "1",
+          "FEX_MULTIBLOCK": "1"
+        }
+      },
+      "tweaks": [
+        {
+          "id": "hitman_scale",
+          "name": "75% render scale (registry SuperSampling)",
+          "type": "wineReg",
+          "path": "pfx:user.reg",
+          "key": "Software\\IO Interactive\\HITMAN3",
+          "numbers": {
+            "SuperSampling": 750
+          }
+        }
+      ]
     }
   ]
 }

@@ -39,6 +39,26 @@ Unreal Engine 4.25, Direct3D 11, **Denuvo**. It hangs on the spinning-shark load
 The app has one button per game: **Apply best settings**. Once applied, the same button reads
 **Revert to my previous settings**.
 
+### Monster Hunter: World (582010)
+
+MT Framework, no Denuvo (removed in 2021). Very CPU-heavy.
+
+* FEX: DroidDeck's Performance + TSO preset (main TSO keeps MT Framework's threads from deadlocking).
+* `graphics_option.ini`: `DirectX12Enable=Off` (DXVK is faster than DX12 on Proton), 1280x720,
+  30 fps cap, and the heavy effects off. The game creates this file on first launch, so launch once
+  before applying.
+
+### HITMAN World of Assassination (1659040)
+
+Glacier 2, Direct3D 12 only (VKD3D-Proton), no Denuvo.
+
+* Launch options `%command% -skip_launcher`.
+* `VKD3D_CONFIG=nodxr` hides ray tracing, the main cause of freezes under Proton. `VKD3D_FRAME_RATE=30`
+  caps the frame rate for stability.
+* FEX: Performance + TSO.
+* Render scale is set to 75% through the `SuperSampling` registry value in the prefix's `user.reg`.
+  Only values the game already wrote are changed, keeping their type.
+
 ## Install and update with Obtainium
 
 The repository is private, so Obtainium needs a GitHub token:

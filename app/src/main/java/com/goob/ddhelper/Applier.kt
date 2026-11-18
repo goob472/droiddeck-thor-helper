@@ -105,6 +105,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                 when (t.type) {
                     "renameFiles" -> tweaksState.put(t.id, renameFiles(install, t))
                     "iniMerge" -> iniMerge(install, t)?.let { tweaksState.put(t.id, it) }
+                    "wineReg" -> wineReg(install, t)?.let { tweaksState.put(t.id, it) }
                     else -> log("Unknown tweak type ${t.type}")
                 }
             } catch (e: Exception) {
@@ -145,7 +146,12 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         if (path == null) {
             log("  ${t.name}: no Proton prefix yet. Launch the game once, then apply again."); return null
         }
-        var text = Root.readText(ctx, path) ?: ""
+        val existing = Root.readText(ctx, path)
+        if (existing == null && t.json.optBoolean("requireExisting")) {
+            log("  ${t.name}: ${path.substringAfterLast('/')} doesn't exist yet. Launch the game once, quit, then apply again.")
+            return null
+        }
+        var text = existing ?: ""
         val sections = t.json.getJSONObject("sections")
         val prev = JSONObject()
         for (sec in sections.keys()) {
@@ -161,6 +167,36 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         }
         write(path, text)
         return JSONObject().put("path", path).put("prev", prev)
+    }
+
+    /** Changes numeric values the game already wrote to its Wine registry hive, keeping their type. */
+    private fun wineReg(install: DroidDeck.Install, t: Tweak): JSONObject? {
+        val path = iniPath(install, t.json.getString("path"))
+        val text0 = path?.let { Root.readText(ctx, it) }
+        if (path == null || text0 == null) {
+            log("  ${t.name}: no Proton prefix yet. Launch the game once, quit, then apply again."); return null
+        }
+        val key = t.json.getString("key")
+        val numbers = t.json.getJSONObject("numbers")
+        var text: String = text0
+        val prev = JSONObject()
+        for (name in numbers.keys()) {
+            val old = WineReg.getRaw(text, key, name)
+            if (old == null) {
+                log("  $name isn't set yet. Launch the game once, quit, then apply again."); continue
+            }
+            val rhs = WineReg.numberLike(old, numbers.getLong(name))
+            val updated = rhs?.let { WineReg.setRaw(text, key, name, it) }
+            if (updated == null) {
+                log("  $name has an unexpected type ($old), left alone."); continue
+            }
+            prev.put(name, old)
+            text = updated
+            log("  registry $name: $old -> $rhs")
+        }
+        if (prev.length() == 0) return null
+        write(path, text)
+        return JSONObject().put("regPath", path).put("key", key).put("prev", prev)
     }
 
     fun revert(game: Game) {
@@ -186,6 +222,16 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                         val n = files.getString(i)
                         if (Root.rename("$dir/$n$BAK", "$dir/$n").ok) log("  restored $n")
                     }
+                } else if (t.has("regPath")) {
+                    val path = t.getString("regPath")
+                    var text = Root.readText(ctx, path) ?: continue
+                    val key = t.getString("key")
+                    val prev = t.getJSONObject("prev")
+                    for (name in prev.keys()) {
+                        WineReg.setRaw(text, key, name, prev.getString(name))?.let { text = it }
+                    }
+                    write(path, text)
+                    log("  restored registry values")
                 } else if (t.has("path")) {
                     val path = t.getString("path")
                     var text = Root.readText(ctx, path) ?: continue
