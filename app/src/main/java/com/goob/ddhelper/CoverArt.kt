@@ -58,7 +58,10 @@ object CoverArt {
     /** Copies the art out of DroidDeck's Steam library cache (needs root). */
     fun fromDroidDeck(ctx: Context, dd: DroidDeck, appId: Long): Bitmap? {
         val src = dd.findArt(appId) ?: return null
+        val bytes = Root.readBytes(src) ?: return null
         val dest = cacheFile(ctx, appId)
-        return if (Root.copyOut(src, dest)) decode(dest) else null
+        dest.parentFile?.mkdirs()
+        dest.writeBytes(bytes)
+        return decode(dest)
     }
 }

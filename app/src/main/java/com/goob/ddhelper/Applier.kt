@@ -35,7 +35,8 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
 
     fun stopDroidDeck() {
         log("Stopping ${dd.pkg} so it cannot overwrite the files…")
-        Root.run("am force-stop ${Root.q(dd.pkg)}")
+        // The one full-root command: closing DroidDeck so it can't overwrite the files mid-change.
+        Root.runAsRoot("am force-stop ${Root.q(dd.pkg)}")
         Thread.sleep(800)
     }
 
@@ -43,9 +44,11 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val dir = File(ctx.filesDir, "backups/$stamp")
         for (p in paths) {
-            if (!Root.exists(p)) continue
+            val bytes = runCatching { Root.readBytes(p) }.getOrNull() ?: continue
             val dest = File(dir, p.trimStart('/').replace('/', '_'))
-            if (Root.copy(p, dest.absolutePath).ok) log("Backed up $p")
+            dest.parentFile?.mkdirs()
+            dest.writeBytes(bytes)
+            log("Backed up $p")
         }
         log("Backups: ${dir.absolutePath}")
     }
@@ -53,6 +56,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
     fun apply(game: Game, pack: Pack) {
         if (pack.manual != null) fail("${pack.name} has to be changed inside the game.")
         if (!Root.available()) fail("Root access was denied.")
+        if (dd.findInstall(game) == null) fail("${game.name} isn't installed in DroidDeck, so nothing was changed.")
         stopDroidDeck()
         backup(listOf(dd.envFile) + dd.localConfigs())
         if (appliedState(game, pack.kind) != null) {
@@ -102,7 +106,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         }
 
         // 3. Game-file tweaks.
-        val install = if (pack.tweaks.isEmpty()) null else dd.findInstall(game.steamAppId, game.installDir)
+        val install = if (pack.tweaks.isEmpty()) null else dd.findInstall(game)
         if (pack.tweaks.isNotEmpty()) {
             if (install == null) log("${game.name} is not installed in any Steam library DroidDeck uses. Skipping game-file tweaks.")
             else log("Found ${game.name} at ${install.gameDir}")
@@ -292,7 +296,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
             sb.appendLine("Per-game environment (${entries.length()} entries):")
             entries.keys().forEach { k -> sb.appendLine("  $k = ${if (entries.isNull(k)) "(unset)" else entries.getString(k)}") }
         }
-        val proton = Root.run("cat ${Root.q(dd.protonGames)} 2>/dev/null").out
+        val proton = runCatching { Root.readText(dd.protonGames) }.getOrNull().orEmpty()
         val choice = runCatching { JSONObject(proton).optJSONObject("games")?.optJSONObject(scope) }.getOrNull()
         sb.appendLine("Proton: " + (choice?.let { "${it.optString("dir")} (per-game)" } ?: "inherits Default profile"))
         for (cfg in dd.localConfigs()) {
@@ -300,7 +304,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
             val lo = Vdf.get(text, STEAM_APPS + scope, "LaunchOptions")
             sb.appendLine("Launch options: ${if (lo.isNullOrEmpty()) "(none)" else lo}")
         }
-        val install = dd.findInstall(game.steamAppId, game.installDir)
+        val install = dd.findInstall(game)
         sb.appendLine("Install: " + (install?.gameDir ?: "not found"))
         if (install != null) sb.appendLine("Proton prefix: " + (install.prefix ?: "not created yet (launch once)"))
         sb.appendLine("Best settings: " + if (appliedState(game) != null) "APPLIED" else "not applied")

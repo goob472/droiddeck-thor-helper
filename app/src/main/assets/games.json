@@ -84,7 +84,11 @@
             }
           }
         ]
-      }
+      },
+      "detectFiles": [
+        "Maneater.exe",
+        "Maneater/Binaries/Win64/Maneater-Win64-Shipping.exe"
+      ]
     },
     {
       "id": "mhw",
@@ -154,7 +158,10 @@
         "name": "UI scale (in-game only)",
         "description": "Monster Hunter: World has no UI scale setting that can be changed from outside the game.",
         "manual": "Monster Hunter: World has no UI or font scale in its config files. Its text and HUD size settings live inside the encrypted save, which this app won't touch, and its Steam Deck patch (15.20) added no UI changes. To make it easier to read on the Thor:\n\n• Start menu > Options > Game Settings > Text Size: set it to the largest size (subtitles and dialogue).\n• Options > Display: raise the HUD-related sizes where offered.\n• The Best settings button already sets 720p, which keeps the UI proportionally the same size but makes the game easier to run."
-      }
+      },
+      "detectFiles": [
+        "MonsterHunterWorld.exe"
+      ]
     },
     {
       "id": "hitman_woa",
@@ -206,7 +213,10 @@
         "env": {
           "SteamDeck": "1"
         }
-      }
+      },
+      "detectFiles": [
+        "Retail/HITMAN3.exe"
+      ]
     }
   ]
 }

@@ -52,7 +52,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(buildUi())
         refreshButtons()
         loadArt()
-        checkAccess()
+        requestAccess()
     }
 
     // ---------- UI construction ----------
@@ -82,12 +82,12 @@ class MainActivity : AppCompatActivity() {
             text = "DroidDeck Thor Helper"
             textSize = 19f; setTypeface(typeface, Typeface.BOLD)
         }
-        accessText = body("Checking root access…", 12.5f).apply { alpha = 0.8f; maxLines = 3 }
+        accessText = body("Checking access…", 12.5f).apply { alpha = 0.8f; maxLines = 3 }
         val titleBlock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(header); addView(accessText)
         }
-        val grantBtn = outlined("Grant root").apply { setOnClickListener { checkAccess() } }
+        val grantBtn = outlined("Grant access").apply { setOnClickListener { requestAccess() } }
         val openBtn = outlined("Open DroidDeck").apply { setOnClickListener { openDroidDeck() } }
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -182,13 +182,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun applier(d: DroidDeck) = Applier(this, d, ::log)
 
-    /** Button labels come from this app's own records, so they don't need root. */
+    /**
+     * Install state per game id, from scanning DroidDeck's Steam libraries: absent from the map =
+     * not scanned yet (no access), null = this game's install folder isn't in DroidDeck.
+     */
+    private val installs = HashMap<String, DroidDeck.Install?>()
+    @Volatile private var working = false
+
+    /** Labels come from this app's own records; enabled state comes from the install scan. */
     private fun refreshButtons() {
         val records = File(filesDir, "applied")
         for (r in rows) {
             val settingsOn = File(records, "${r.game.id}.json").isFile
             val ui = r.game.ui
             val uiOn = File(records, "${r.game.id}.${Pack.UI}.json").isFile
+            val scanned = installs.containsKey(r.game.id)
+            val install = installs[r.game.id]
+            val installed = install != null
+
             r.settingsBtn.text = if (settingsOn) "Revert settings" else "Apply best settings"
             r.uiBtn.visibility = if (ui == null) View.GONE else View.VISIBLE
             r.uiBtn.text = when {
@@ -197,34 +208,87 @@ class MainActivity : AppCompatActivity() {
                 uiOn -> "Revert UI mod"
                 else -> "Apply UI mod"
             }
+            // Applying needs the game's install folder in DroidDeck. Reverting stays possible after an
+            // uninstall so changes can always be undone, and the how-to only shows text.
+            r.settingsBtn.isEnabled = !working && (installed || (scanned && settingsOn))
+            r.uiBtn.isEnabled = !working && (ui?.manual != null || installed || (scanned && uiOn))
             r.status.text = buildString {
-                append("Settings: ").append(if (settingsOn) "applied ✓" else "not applied")
-                if (ui != null) append("\nUI: ").append(if (ui.manual != null) "in-game only" else if (uiOn) "applied ✓" else "not applied")
+                append(
+                    when {
+                        !scanned -> "Install: grant DroidDeck access to check"
+                        installed -> "Installed ✓ " + install!!.gameDir.substringAfter("/steamapps/common/")
+                        else -> "Not installed in DroidDeck"
+                    }
+                )
+                append("\nSettings: ").append(if (settingsOn) "applied ✓" else "not applied")
+                if (ui != null) append(" · UI: ").append(if (ui.manual != null) "in-game" else if (uiOn) "applied ✓" else "off")
             }
+            r.status.alpha = if (scanned && !installed) 0.55f else 0.8f
         }
     }
 
-    private fun busy(b: Boolean) = main.post {
-        rows.forEach { it.settingsBtn.isEnabled = !b; it.uiBtn.isEnabled = !b }
+    private fun busy(b: Boolean) = main.post { working = b; refreshButtons() }
+
+    private val consentPrefs get() = getSharedPreferences("access", MODE_PRIVATE)
+
+    /** Shows exactly what the app will touch, once per DroidDeck package, before asking for root. */
+    private fun requestAccess() {
+        val found = DroidDeck.detect(this)
+        val d = found.firstOrNull()
+        if (d == null) {
+            accessText.text = "DroidDeck isn't installed. Install it and set up its Linux runtime first."
+            return
+        }
+        if (consentPrefs.getBoolean(d.pkg, false)) {
+            checkAccess(d); return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Allow access to DroidDeck's folder?")
+            .setMessage(
+                "DroidDeck keeps its settings in its private folder, which Android only lets other apps reach " +
+                    "with root. This app will only read and change files in:\n\n" +
+                    "• ${d.files}  (DroidDeck's settings, Steam config and games)\n" +
+                    "• Steam library folders DroidDeck itself has registered, if you installed games to shared or SD-card storage\n\n" +
+                    "Anything else is refused. When your root manager supports it, file changes run as DroidDeck's own " +
+                    "user, so Android blocks every other app's data. The one other root command closes DroidDeck before applying.\n\n" +
+                    "Your root manager will ask you to approve next."
+            )
+            .setPositiveButton("Allow") { _, _ ->
+                consentPrefs.edit().putBoolean(d.pkg, true).apply()
+                checkAccess(d)
+            }
+            .setNegativeButton("Not now") { _, _ ->
+                accessText.text = "No access yet. Tap Grant access when you're ready."
+            }
+            .show()
     }
 
-    private fun checkAccess() {
+    private fun checkAccess(d: DroidDeck) {
         accessText.text = "Requesting root… (approve the prompt from Magisk/KernelSU/APatch)"
         thread {
             rootOk = Root.available()
-            val found = if (rootOk) DroidDeck.detect(this) else emptyList()
-            dd = found.firstOrNull()
-            main.post {
-                accessText.text = when {
-                    !rootOk -> "Root not granted. Approve it in your root manager, then tap Grant root."
-                    dd == null -> "Root OK, but no DroidDeck install was found. Install DroidDeck and set up its Linux runtime first."
-                    else -> buildString {
-                        append("Root OK · DroidDeck ${dd!!.versionName ?: ""} (${dd!!.pkg})")
-                        if (found.size > 1) append("\nAlso installed: ${found.drop(1).joinToString { it.pkg }}. Using the first one.")
-                    }
-                }
+            if (!rootOk) {
+                main.post { accessText.text = "Root not granted. Approve it in your root manager, then tap Grant access." }
+                return@thread
             }
-            dd?.let { loadArtFromDroidDeck(it) }
+            dd = d
+            d.grantScopedAccess()
+            val mode = Root.droidDeckUid?.let { "running as DroidDeck's user (uid $it)" } ?: "root, limited to DroidDeck's folders"
+            main.post { accessText.text = "Access: DroidDeck ${d.versionName ?: ""} folder only · $mode\nChecking which games are installed…" }
+            scanInstalls(d)
+            main.post {
+                val n = installs.values.count { it != null }
+                accessText.text = "Access: DroidDeck ${d.versionName ?: ""} folder only · $mode\n$n of ${games.size} games found in DroidDeck"
+            }
+            loadArtFromDroidDeck(d)
+        }
+    }
+
+    /** Looks for each game's own install folder (appmanifest + folder + executable) inside DroidDeck. */
+    private fun scanInstalls(d: DroidDeck) {
+        for (g in games) {
+            val install = runCatching { d.findInstall(g) }.getOrNull()
+            main.post { installs[g.id] = install; refreshButtons() }
         }
     }
 
@@ -257,7 +321,7 @@ class MainActivity : AppCompatActivity() {
     private fun requireReady(): DroidDeck? {
         val d = dd
         if (!rootOk || d == null) {
-            AlertDialog.Builder(this).setMessage("Grant root and make sure DroidDeck is installed first.")
+            AlertDialog.Builder(this).setMessage("Tap Grant access first so the app can reach DroidDeck's folder.")
                 .setPositiveButton("OK", null).show()
             return null
         }

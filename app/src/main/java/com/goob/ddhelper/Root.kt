@@ -1,13 +1,22 @@
 package com.goob.ddhelper
 
 import android.content.Context
-import java.io.File
+import java.io.ByteArrayOutputStream
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
- * Thin wrapper over `su`. Scripts are fed on stdin so nothing needs shell-escaping twice.
- * Every path that goes into a script is passed through [q].
+ * Shell access, kept as narrow as possible.
+ *
+ * - Every file operation goes through [Scope]: paths outside DroidDeck's own folder and the Steam
+ *   libraries DroidDeck has registered are refused before any command runs.
+ * - When the root manager supports it (`su <uid>`), file work inside DroidDeck's folder runs as
+ *   DroidDeck's own Android user, so the kernel itself stops it from reaching any other app's data.
+ * - Full root is used only to detect DroidDeck's user id, to close DroidDeck before applying, and
+ *   for Steam libraries on shared or SD-card storage that DroidDeck's user can't open from a shell.
+ * - File contents travel through the shell as base64, so no temporary files are shared and the
+ *   bytes (including line endings) come back exactly as they are on disk.
  */
 object Root {
     data class Result(val code: Int, val out: String, val err: String) {
@@ -16,12 +25,15 @@ object Root {
 
     fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
-    fun run(script: String, timeoutSec: Long = 60): Result {
+    /** DroidDeck's Linux user id, when `su <uid>` works; null means scoped full root is used. */
+    @Volatile var droidDeckUid: Int? = null
+
+    private fun exec(cmd: List<String>, script: String, timeoutSec: Long): Result {
         return try {
-            val p = ProcessBuilder("su").start()
-            val out = StringBuilder()
+            val p = ProcessBuilder(cmd).start()
+            val out = ByteArrayOutputStream()
             val err = StringBuilder()
-            val t1 = thread { p.inputStream.bufferedReader().use { r -> r.forEachLine { out.appendLine(it) } } }
+            val t1 = thread { p.inputStream.use { it.copyTo(out) } }
             val t2 = thread { p.errorStream.bufferedReader().use { r -> r.forEachLine { err.appendLine(it) } } }
             p.outputStream.bufferedWriter().use { w ->
                 w.write(script)
@@ -29,87 +41,116 @@ object Root {
             }
             if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                 p.destroyForcibly()
-                return Result(124, out.toString(), "timed out after ${timeoutSec}s")
+                return Result(124, out.toString(Charsets.UTF_8.name()), "timed out after ${timeoutSec}s")
             }
-            t1.join(2000); t2.join(2000)
-            Result(p.exitValue(), out.toString(), err.toString())
+            t1.join(5000); t2.join(2000)
+            Result(p.exitValue(), out.toString(Charsets.UTF_8.name()), err.toString())
         } catch (e: Exception) {
             Result(127, "", e.message ?: e.toString())
         }
     }
 
-    fun available(): Boolean = run("id -u", 20).out.trim() == "0"
+    /** Full root. Only for the few fixed commands listed in the class comment. */
+    fun runAsRoot(script: String, timeoutSec: Long = 60) = exec(listOf("su"), script, timeoutSec)
 
-    fun exists(path: String) = run("[ -e ${q(path)} ]").ok
-    fun isDir(path: String) = run("[ -d ${q(path)} ]").ok
-
-    /** Returns file contents, or null if the file does not exist / cannot be read. */
-    fun readText(ctx: Context, path: String): String? {
-        val tmp = File(ctx.cacheDir, "read-${System.nanoTime()}.tmp")
-        val r = run(
-            "[ -f ${q(path)} ] || exit 3\n" +
-                "cat ${q(path)} > ${q(tmp.absolutePath)} && chmod 0644 ${q(tmp.absolutePath)}"
-        )
-        if (!r.ok) {
-            tmp.delete(); return null
-        }
-        return try {
-            tmp.readText()
-        } finally {
-            run("rm -f ${q(tmp.absolutePath)}")
-            tmp.delete()
-        }
+    /** Runs a file command touching [paths]: as DroidDeck's user when they are all inside its folder. */
+    private fun runScoped(paths: List<String>, script: String, timeoutSec: Long = 60): Result {
+        paths.forEach(Scope::check)
+        val uid = droidDeckUid
+        return if (uid != null && paths.all(Scope::isInsideDroidDeck)) exec(listOf("su", uid.toString()), script, timeoutSec)
+        else runAsRoot(script, timeoutSec)
     }
 
+    fun available(): Boolean = runAsRoot("id -u", 20).out.trim() == "0"
+
+    /** Finds DroidDeck's uid and checks that `su <uid>` really drops to it. */
+    fun setupDroidDeckUser(dataDir: String) {
+        droidDeckUid = null
+        val uid = runAsRoot("stat -c %u ${q(dataDir)}").out.trim().toIntOrNull() ?: return
+        if (uid < 10000) return
+        val r = exec(listOf("su", uid.toString()), "id -u", 20)
+        if (r.ok && r.out.trim() == uid.toString()) droidDeckUid = uid
+    }
+
+    fun exists(path: String) = runScoped(listOf(path), "[ -e ${q(path)} ]").ok
+    fun isDir(path: String) = runScoped(listOf(path), "[ -d ${q(path)} ]").ok
+
     fun list(path: String): List<String> {
-        val r = run("[ -d ${q(path)} ] && ls -1A ${q(path)}")
+        val r = runScoped(listOf(path), "[ -d ${q(path)} ] && ls -1A ${q(path)}")
         return if (r.ok) r.out.lines().map { it.trim() }.filter { it.isNotEmpty() } else emptyList()
     }
 
+    /** Exact file bytes, or null if the file doesn't exist or can't be read. */
+    fun readBytes(path: String): ByteArray? {
+        val r = runScoped(listOf(path), "[ -f ${q(path)} ] || exit 3\nbase64 ${q(path)}", 120)
+        if (!r.ok) return null
+        return runCatching { Base64.getMimeDecoder().decode(r.out.trim()) }.getOrNull()
+    }
+
+    fun readText(path: String): String? = readBytes(path)?.toString(Charsets.UTF_8)
+
+    @Suppress("UNUSED_PARAMETER")
+    fun readText(ctx: Context, path: String): String? = readText(path)
+
+    fun isFile(path: String) = runScoped(listOf(path), "[ -f ${q(path)} ]").ok
+
     /**
-     * Writes [text] to [path] as root. An existing file is rewritten in place so it keeps its owner,
-     * mode and SELinux label. A new file (and any directories created for it) takes the owner and
-     * label of the nearest existing ancestor directory, so the owning app can still read it.
+     * Writes [text] to [path]. An existing file is rewritten in place so it keeps its owner, mode and
+     * SELinux label. A new file (and any directories created for it) takes the owner and label of the
+     * nearest existing folder, so the game or DroidDeck can still read it.
      */
-    fun writeText(ctx: Context, path: String, text: String): Result {
-        val tmp = File(ctx.cacheDir, "write-${System.nanoTime()}.tmp")
-        tmp.writeText(text)
-        tmp.setReadable(true, false)
-        val script = """
+    fun writeText(@Suppress("UNUSED_PARAMETER") ctx: Context, path: String, text: String): Result =
+        // The temp file sits next to the target, so it is inside the same allowed folder.
+        runScoped(listOf(path, "$path.ddh-tmp"), writeScript(path, text.toByteArray(Charsets.UTF_8)))
+
+    /** The shell script behind [writeText]. Separate so it can be run against a real device in tests. */
+    internal fun writeScript(path: String, bytes: ByteArray): String {
+        val b64 = Base64.getMimeEncoder(76, "\n".toByteArray()).encodeToString(bytes)
+        val d = "$"
+        // 1. Find the nearest existing folder, remember its owner and SELinux label, create the rest.
+        val prepare = """
             target=${q(path)}
-            tmp=${q(tmp.absolutePath)}
-            if [ -e "${'$'}target" ]; then
-              cat "${'$'}tmp" > "${'$'}target" || exit 1
+            tmp="${d}target.ddh-tmp"
+            dir=${d}(dirname "${d}target")
+            a="${d}dir"
+            while [ ! -d "${d}a" ]; do a=${d}(dirname "${d}a"); done
+            own=${d}(stat -c '%u:%g' "${d}a")
+            lbl=${d}(stat -c '%C' "${d}a" 2>/dev/null)
+            case "${d}lbl" in *:*) ;; *) lbl=${d}(ls -Zd "${d}a" | awk '{print ${d}1}') ;; esac
+            mkdir -p "${d}dir" || exit 1
+            export TMPDIR="${d}dir"
+        """.trimIndent()
+        // TMPDIR: the shell keeps heredoc data in a temp file, by default in /data/local, which
+        // DroidDeck's own user can't write. The target folder is inside the allowed area.
+        // 2. Decode the exact bytes. Heredoc lines must start at column 0, so no trimIndent here.
+        val decode = "base64 -d > \"${d}tmp\" <<'DDH_B64_END' || { rm -f \"${d}tmp\"; exit 1; }\n" +
+            (if (b64.isEmpty()) "" else b64 + "\n") +
+            "DDH_B64_END\n"
+        // 3. Rewrite an existing file in place (keeps owner, mode, label), or move a new one into place
+        //    and give it, and any folders created for it, the nearest existing folder's owner and label.
+        val place = """
+            if [ -e "${d}target" ]; then
+              cat "${d}tmp" > "${d}target" || { rm -f "${d}tmp"; exit 1; }
+              rm -f "${d}tmp"
             else
-              dir=${'$'}(dirname "${'$'}target")
-              a="${'$'}dir"
-              while [ ! -d "${'$'}a" ]; do a=${'$'}(dirname "${'$'}a"); done
-              own=${'$'}(stat -c '%u:%g' "${'$'}a")
-              lbl=${'$'}(stat -c '%C' "${'$'}a" 2>/dev/null)
-              case "${'$'}lbl" in *:*) ;; *) lbl=${'$'}(ls -Zd "${'$'}a" | awk '{print ${'$'}1}') ;; esac
-              mkdir -p "${'$'}dir" || exit 1
-              cat "${'$'}tmp" > "${'$'}target" || exit 1
-              chmod 0660 "${'$'}target"
-              p="${'$'}target"
-              while [ "${'$'}p" != "${'$'}a" ] && [ "${'$'}p" != "/" ]; do
-                chown "${'$'}own" "${'$'}p"
-                case "${'$'}lbl" in *:*) chcon "${'$'}lbl" "${'$'}p" 2>/dev/null ;; esac
-                p=${'$'}(dirname "${'$'}p")
+              mv -f "${d}tmp" "${d}target" || { rm -f "${d}tmp"; exit 1; }
+              chmod 0660 "${d}target"
+              p="${d}target"
+              while [ "${d}p" != "${d}a" ] && [ "${d}p" != "/" ]; do
+                chown "${d}own" "${d}p" 2>/dev/null
+                case "${d}lbl" in *:*) chcon "${d}lbl" "${d}p" 2>/dev/null ;; esac
+                p=${d}(dirname "${d}p")
               done
             fi
         """.trimIndent()
-        val r = run(script)
-        tmp.delete()
-        return r
+        return prepare + "\n" + decode + place + "\n"
     }
 
-    fun rename(from: String, to: String) = run("mv -f ${q(from)} ${q(to)}")
+    fun rename(from: String, to: String) = runScoped(listOf(from, to), "mv -f ${q(from)} ${q(to)}")
 
-    /** Copies a root-only file into this app's own storage so it can be read without root. */
-    fun copyOut(path: String, dest: File): Boolean {
-        dest.parentFile?.mkdirs()
-        return run("cat ${q(path)} > ${q(dest.absolutePath)} && chmod 0644 ${q(dest.absolutePath)}").ok && dest.length() > 0
+    /** Lists matching files under an allowed folder (used to find cached cover art). */
+    fun find(dir: String, namePattern: String): List<String> {
+        val r = runScoped(listOf(dir), "[ -d ${q(dir)} ] && find ${q(dir)} -name ${q(namePattern)} 2>/dev/null")
+        return r.out.lines().map { it.trim() }.filter { it.isNotEmpty() && Scope.allows(it) }
     }
-
-    fun copy(from: String, to: String) = run("mkdir -p ${q(File(to).parent!!)} && cp -p ${q(from)} ${q(to)}")
 }

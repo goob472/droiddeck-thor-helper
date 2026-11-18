@@ -43,6 +43,8 @@ data class Game(
     val profile: Variant,
     val tweaks: List<Tweak>,
     val ui: Pack? = null,
+    /** Files inside the install folder that prove the game is really installed (any one is enough). */
+    val detectFiles: List<String> = emptyList(),
 ) {
     val settings: Pack
         get() = Pack(Pack.SETTINGS, "Best settings", profile.description, GameDb.environment(this), launchOptions, tweaks)
@@ -82,6 +84,7 @@ object GameDb {
                 env = strMap(g.optJSONObject("env")),
                 profile = Variant("best", profile.getString("name"), profile.optString("description"), strMap(profile.optJSONObject("fex"))),
                 tweaks = tweaks(tweaks),
+                detectFiles = strList(g.optJSONArray("detectFiles")),
                 ui = ui?.let {
                     Pack(
                         Pack.UI, it.getString("name"), it.optString("description"), strMap(it.optJSONObject("env")),

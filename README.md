@@ -3,19 +3,39 @@
 An Android helper for the **AYN Thor** (Snapdragon 8 Gen 2, Adreno 740). It applies tuned
 [DroidDeck](https://github.com/Droid-Deck/DroidDeck) settings to one game at a time. It needs root.
 
+## Access: DroidDeck's folder only
+
+DroidDeck keeps its settings in its private app folder, which Android's folder picker can't open for
+another app, so root is needed. The app keeps that access as narrow as it can:
+
+* Before asking for root it shows exactly what it will touch: `/data/data/<droiddeck>/files` and any
+  Steam library folders DroidDeck itself registered (for games on shared or SD-card storage).
+* Every file operation is checked against that list ([`Scope.kt`](app/src/main/java/com/goob/ddhelper/Scope.kt))
+  and anything else is refused. System folders and other apps' data are never accepted as a "library".
+* When the root manager supports `su <uid>` (Magisk does), file work inside DroidDeck's folder runs as
+  DroidDeck's own Android user, so the kernel blocks every other app's data. The only full-root
+  command is closing DroidDeck before applying.
+* File contents pass through the shell as base64, so the bytes are exact and no temporary files are
+  shared. New files get DroidDeck's owner and SELinux label.
+  [`tools/check_write_scripts.sh`](tools/check_write_scripts.sh) checks this on a device.
+
 ## What it changes
 
-It writes the same files DroidDeck's own settings screens write, scoped to the selected game's Steam app ID:
+It writes the same files DroidDeck's own settings screens write, for the selected game's Steam app ID only:
 
 | What | File (under `/data/data/com.droiddeck.launcher/files`) |
 | --- | --- |
 | FEX preset and environment fixes | `game-environment.json` → `games["<appid>"]` (DroidDeck → Games → Game environment) |
 | Steam launch options | `linuxfs/root/.local/share/Steam/userdata/<id>/config/localconfig.vdf` |
-| Game tweaks (intro movies, `Engine.ini`) | the game's install folder and its Proton prefix |
+| Game tweaks (intro movies, `Engine.ini`, `graphics_option.ini`, registry) | the game's install folder and its Proton prefix |
 
-Before writing, it force-closes DroidDeck so a running session cannot overwrite the changes. It
-backs up every file to its own data folder and records each previous value, so **Revert** restores
-exactly what you had. DroidDeck picks the changes up the next time you launch the game.
+Before writing, it closes DroidDeck so a running session can't overwrite the changes. It backs up every
+file to its own data folder and records each previous value, so **Revert** restores exactly what you
+had. DroidDeck picks the changes up the next time you launch the game.
+
+A game's buttons are greyed out until its install is found inside DroidDeck: Steam's
+`appmanifest_<appid>.acf`, the folder under `steamapps/common`, and the game's executable in it.
+Revert stays available if a game is uninstalled after applying.
 
 ## The game list
 
