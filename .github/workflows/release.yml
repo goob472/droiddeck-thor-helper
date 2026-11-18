@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+# One release at a time, in push order, so the newest build is always the Latest release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
