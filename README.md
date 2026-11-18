@@ -118,12 +118,13 @@ Forge engine, 32-bit Direct3D 9 through DXVK.
 
 ## Install and update with Obtainium
 
-The repository is private, so Obtainium needs a GitHub token:
+In Obtainium, tap **Add app** and enter:
 
-1. On GitHub: **Settings → Developer settings → Fine-grained tokens → Generate new token**.
-   Under repository access, pick only this repository. Under permissions, set **Contents: Read-only**.
-2. In Obtainium: **Settings → GitHub → Personal access token**, and paste the token.
-3. **Add app** with the URL `https://github.com/goob472/droiddeck-thor-helper`.
+```
+https://github.com/goob472/droiddeck-thor-helper
+```
+
+No account or token is needed. Obtainium picks up each new release as an update.
 
 Every push to `main` builds a signed APK and publishes it as a GitHub Release (`v1.0.<build>`).
 
