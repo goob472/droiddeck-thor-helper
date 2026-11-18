@@ -42,7 +42,7 @@ class ScopeTest {
 
     @Test fun shallowLibraryRootsAreIgnored() {
         Scope.setLibraries(listOf("/", "/storage", "/storage/emulated", "/storage/emulated/0/Games/Steam"))
-        assertEquals(listOf("/data/data/$pkg", "/storage/emulated/0/Games/Steam"), Scope.folders())
+        assertEquals(listOf("/data/user/0/$pkg", "/storage/emulated/0/Games/Steam"), Scope.folders())
         assertFalse(Scope.allows("/storage/emulated/0/Pictures/x.jpg"))
     }
 

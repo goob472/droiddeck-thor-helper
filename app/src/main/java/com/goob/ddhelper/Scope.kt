@@ -10,9 +10,10 @@ object Scope {
     @Volatile private var droidDeckDirs: List<String> = emptyList()
     @Volatile private var libraries: List<String> = emptyList()
 
-    fun setDroidDeck(pkg: String) {
+    /** [dataPath] is the folder DroidDeck's provider reports (normally /data/user/0/<pkg>). */
+    fun setDroidDeck(pkg: String, dataPath: String = "/data/user/0/$pkg") {
         // /data/data/<pkg> and /data/user/0/<pkg> are the same folder on every Android version.
-        droidDeckDirs = listOf("/data/data/$pkg", "/data/user/0/$pkg")
+        droidDeckDirs = listOf(dataPath.trimEnd('/'), "/data/data/$pkg", "/data/user/0/$pkg").distinct()
         libraries = emptyList()
     }
 

@@ -11,7 +11,7 @@ import java.net.URL
  * Portrait cover art (600x900, 2:3) for a Steam game, cached in the app's files.
  *
  * Source order: the cached copy, Steam's public image CDN (no API key, the same library capsule the
- * Steam client shows), then the copy in DroidDeck's own Steam cache through root, for offline use.
+ * Steam client shows), then the copy in DroidDeck's own Steam cache, for offline use.
  */
 object CoverArt {
     private val CDN = listOf(
@@ -55,10 +55,10 @@ object CoverArt {
         return null
     }
 
-    /** Copies the art out of DroidDeck's Steam library cache (needs root). */
+    /** Copies the art out of DroidDeck's Steam library cache, through the granted DroidDeck folder. */
     fun fromDroidDeck(ctx: Context, dd: DroidDeck, appId: Long): Bitmap? {
         val src = dd.findArt(appId) ?: return null
-        val bytes = Root.readBytes(src) ?: return null
+        val bytes = Storage.readBytes(src) ?: return null
         val dest = cacheFile(ctx, appId)
         dest.parentFile?.mkdirs()
         dest.writeBytes(bytes)

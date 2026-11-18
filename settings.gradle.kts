@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "DroidDeckThorHelper"
 include(":app")
+include(":fakedroiddeck")

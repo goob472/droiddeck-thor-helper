@@ -1,37 +1,39 @@
 # DroidDeck Thor Helper
 
 An Android helper for the **AYN Thor** (Snapdragon 8 Gen 2, Adreno 740). It applies tuned
-[DroidDeck](https://github.com/Droid-Deck/DroidDeck) settings to one game at a time. It needs root.
+[DroidDeck](https://github.com/Droid-Deck/DroidDeck) settings to one game at a time. No root needed: it works through DroidDeck's folder via Android's file picker.
 
-## Access: DroidDeck's folder only
+## Access: DroidDeck's folder, through Android's file picker (no root)
 
-DroidDeck keeps its settings in its private app folder, which Android's folder picker can't open for
-another app, so root is needed. The app keeps that access as narrow as it can:
+DroidDeck exposes its app folder to Android's file picker through its own documents provider. The first
+time you open this app, it asks you to pick that folder: in the picker, open the ☰ menu, tap
+**DroidDeck**, then **Use this folder** and **Allow**. Android remembers the grant.
 
-* Before asking for root it shows exactly what it will touch: `/data/data/<droiddeck>/files` and any
-  Steam library folders DroidDeck itself registered (for games on shared or SD-card storage).
-* Every file operation is checked against that list ([`Scope.kt`](app/src/main/java/com/goob/ddhelper/Scope.kt))
-  and anything else is refused. System folders and other apps' data are never accepted as a "library".
-* When the root manager supports `su <uid>` (Magisk does), file work inside DroidDeck's folder runs as
-  DroidDeck's own Android user, so the kernel blocks every other app's data. The only full-root
-  command is closing DroidDeck before applying.
-* File contents pass through the shell as base64, so the bytes are exact and no temporary files are
-  shared. New files get DroidDeck's owner and SELinux label.
-  [`tools/check_write_scripts.sh`](tools/check_write_scripts.sh) checks this on a device.
+* Android only gives this app the folder you picked. Every operation is also checked against that
+  folder in [`Scope.kt`](app/src/main/java/com/goob/ddhelper/Scope.kt).
+* Files are created and written by DroidDeck's own provider, so their owner and permissions are always
+  what DroidDeck expects.
+* If DroidDeck has a Steam library on shared storage or an SD card, the app asks for that library folder
+  separately (**Grant library folder**).
+* No root is used. The app can't close DroidDeck itself, so before applying it asks you to close it,
+  with a **Force stop DroidDeck** shortcut to Android's App info page. If Steam is running when you apply,
+  it can rewrite its config on exit and undo the change.
+
+Each game's **Details** page shows an install check: every Steam library looked at and why the game was or
+wasn't found there (missing appmanifest, missing install folder, or missing executable).
 
 ## What it changes
 
 It writes the same files DroidDeck's own settings screens write, for the selected game's Steam app ID only:
 
-| What | File (under `/data/data/com.droiddeck.launcher/files`) |
+| What | File (under DroidDeck's `files` folder) |
 | --- | --- |
 | FEX preset and environment fixes | `game-environment.json` → `games["<appid>"]` (DroidDeck → Games → Game environment) |
 | Steam launch options | `linuxfs/root/.local/share/Steam/userdata/<id>/config/localconfig.vdf` |
 | Game tweaks (intro movies, `Engine.ini`, `graphics_option.ini`, registry) | the game's install folder and its Proton prefix |
 
-Before writing, it closes DroidDeck so a running session can't overwrite the changes. It backs up every
-file to its own data folder and records each previous value, so **Revert** restores exactly what you
-had. DroidDeck picks the changes up the next time you launch the game.
+It backs up every file to its own data folder and records each previous value, so **Revert** restores
+exactly what you had. DroidDeck picks the changes up the next time you launch the game.
 
 A game's buttons are greyed out until its install is found inside DroidDeck: Steam's
 `appmanifest_<appid>.acf`, the folder under `steamapps/common`, and the game's executable in it.
@@ -127,6 +129,16 @@ https://github.com/goob472/droiddeck-thor-helper
 No account or token is needed. Obtainium picks up each new release as an update.
 
 Every push to `main` builds a signed APK and publishes it as a GitHub Release (`v1.0.<build>`).
+
+## Testing on an emulator
+
+`fakedroiddeck` is a test-only app that installs as `com.droiddeck.launcher` and exposes a seeded,
+fake DroidDeck folder through a documents provider, the same way DroidDeck does. With it, the folder picker,
+game detection, apply and revert can all be tested on an emulator. It is never released.
+
+```bash
+./gradlew :app:assembleDebug :fakedroiddeck:assembleDebug
+```
 
 ## Building locally
 

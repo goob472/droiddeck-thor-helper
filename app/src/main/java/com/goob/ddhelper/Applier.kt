@@ -29,22 +29,15 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
     private fun fail(msg: String): Nothing = throw IllegalStateException(msg)
 
     private fun write(path: String, text: String) {
-        val r = Root.writeText(ctx, path, text)
+        val r = Storage.writeText(ctx, path, text)
         if (!r.ok) fail("Could not write $path: ${r.err.trim()}")
-    }
-
-    fun stopDroidDeck() {
-        log("Stopping ${dd.pkg} so it cannot overwrite the files…")
-        // The one full-root command: closing DroidDeck so it can't overwrite the files mid-change.
-        Root.runAsRoot("am force-stop ${Root.q(dd.pkg)}")
-        Thread.sleep(800)
     }
 
     private fun backup(paths: List<String>) {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val dir = File(ctx.filesDir, "backups/$stamp")
         for (p in paths) {
-            val bytes = runCatching { Root.readBytes(p) }.getOrNull() ?: continue
+            val bytes = runCatching { Storage.readBytes(p) }.getOrNull() ?: continue
             val dest = File(dir, p.trimStart('/').replace('/', '_'))
             dest.parentFile?.mkdirs()
             dest.writeBytes(bytes)
@@ -55,9 +48,8 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
 
     fun apply(game: Game, pack: Pack) {
         if (pack.manual != null) fail("${pack.name} has to be changed inside the game.")
-        if (!Root.available()) fail("Root access was denied.")
+        if (!Storage.isGranted(dd.envFile)) fail("Access to DroidDeck's folder hasn't been granted yet.")
         if (dd.findInstall(game) == null) fail("${game.name} isn't installed in DroidDeck, so nothing was changed.")
-        stopDroidDeck()
         backup(listOf(dd.envFile) + dd.localConfigs())
         if (appliedState(game, pack.kind) != null) {
             log("${pack.name} is already applied. Reverting it first so it starts from your own settings.")
@@ -71,7 +63,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         // 1. Per-game environment (FEX preset + fixes).
         val entries = pack.env
         if (entries.isNotEmpty()) {
-        val envText = Root.readText(ctx, dd.envFile)
+        val envText = Storage.readText(dd.envFile)
         if (envText == null) log("No game-environment.json yet; creating one.")
         val env = EnvFile.parseOrNew(envText)
         val prev = EnvFile.apply(env, scope, entries)
@@ -89,7 +81,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
             if (configs.isEmpty()) log("No Steam localconfig.vdf found. Sign in to Steam in DroidDeck once, then apply again to set launch options.")
             val launch = JSONObject()
             for (cfg in configs) {
-                val text = Root.readText(ctx, cfg) ?: continue
+                val text = Storage.readText(cfg) ?: continue
                 val path = STEAM_APPS + scope
                 val old = Vdf.get(text, path, "LaunchOptions")
                 val merged = mergeLaunchOptions(old, pack.launchOptions)
@@ -140,9 +132,9 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         val prefixes = t.json.getJSONArray("prefixes").let { a -> (0 until a.length()).map { a.getString(it) } }
         val suffix = t.json.optString("suffix")
         val renamed = JSONArray()
-        for (name in Root.list(dir)) {
+        for (name in Storage.list(dir)) {
             if (prefixes.none { name.startsWith(it, true) } || !name.endsWith(suffix, true)) continue
-            if (Root.rename("$dir/$name", "$dir/$name$BAK").ok) {
+            if (Storage.rename("$dir/$name", "$dir/$name$BAK").ok) {
                 renamed.put(name); log("  renamed $name")
             }
         }
@@ -161,7 +153,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         if (path == null) {
             log("  ${t.name}: no Proton prefix yet. Launch the game once, then apply again."); return null
         }
-        val existing = Root.readText(ctx, path)
+        val existing = Storage.readText(path)
         if (existing == null && t.json.optBoolean("requireExisting")) {
             log("  ${t.name}: ${path.substringAfterLast('/')} doesn't exist yet. Launch the game once, quit, then apply again.")
             return null
@@ -195,7 +187,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
             raw.startsWith("game:") -> dd.resolveIgnoringCase(install.gameDir, raw.removePrefix("game:"))
             else -> null
         }
-        val text = path?.let { Root.readText(it) }
+        val text = path?.let { Storage.readText(it) }
         if (path == null || text == null) {
             log("  ${t.name}: the game hasn't created its settings file yet. Launch it once, quit, then apply again.")
             return null
@@ -236,16 +228,16 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                 // Remember folders this mod creates, deepest last, so revert can remove them if empty.
                 var parent = rel.substringBeforeLast('/', "")
                 val newDirs = ArrayList<String>()
-                while (parent.isNotEmpty() && !Root.isDir("${install.gameDir}/$parent")) {
+                while (parent.isNotEmpty() && !Storage.isDir("${install.gameDir}/$parent")) {
                     newDirs += parent; parent = parent.substringBeforeLast('/', "")
                 }
                 newDirs.asReversed().forEach { d -> if ((0 until dirs.length()).none { dirs.getString(it) == d }) dirs.put(d) }
-                val old = Root.readBytes(target)
+                val old = Storage.readBytes(target)
                 if (old != null) {
                     File(backupDir, rel).apply { parentFile?.mkdirs() }.writeBytes(old)
                     replaced.put(rel)
                 } else created.put(rel)
-                val r = Root.writeBytes(target, bytes)
+                val r = Storage.writeBytes(target, bytes)
                 if (!r.ok) fail("Could not write $target: ${r.err.trim()}")
                 log("  installed $rel (${bytes.size / 1024} KB)")
             }
@@ -258,7 +250,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
     /** Changes numeric values the game already wrote to its Wine registry hive, keeping their type. */
     private fun wineReg(install: DroidDeck.Install, t: Tweak): JSONObject? {
         val path = iniPath(install, t.json.getString("path"))
-        val text0 = path?.let { Root.readText(ctx, it) }
+        val text0 = path?.let { Storage.readText(it) }
         if (path == null || text0 == null) {
             log("  ${t.name}: no Proton prefix yet. Launch the game once, quit, then apply again."); return null
         }
@@ -286,9 +278,8 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
     }
 
     fun revert(game: Game, pack: Pack) {
-        if (!Root.available()) fail("Root access was denied.")
+        if (!Storage.isGranted(dd.envFile)) fail("Access to DroidDeck's folder hasn't been granted yet.")
         if (appliedState(game, pack.kind) == null) fail("${pack.name} isn't applied for ${game.name}.")
-        stopDroidDeck()
         backup(listOf(dd.envFile) + dd.localConfigs())
         revertInternal(game, pack.kind)
         log("Reverted ${pack.name} for ${game.name}.")
@@ -306,7 +297,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                     val files = t.getJSONArray("files")
                     for (i in 0 until files.length()) {
                         val n = files.getString(i)
-                        if (Root.rename("$dir/$n$BAK", "$dir/$n").ok) log("  restored $n")
+                        if (Storage.rename("$dir/$n$BAK", "$dir/$n").ok) log("  restored $n")
                     }
                 } else if (t.has("modDir")) {
                     val dir = t.getString("modDir")
@@ -314,25 +305,25 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                     val created = t.getJSONArray("created")
                     for (i in 0 until created.length()) {
                         val rel = created.getString(i)
-                        if (Root.deleteFile("$dir/$rel").ok) log("  removed $rel")
+                        if (Storage.deleteFile("$dir/$rel").ok) log("  removed $rel")
                     }
                     val replaced = t.getJSONArray("replaced")
                     for (i in 0 until replaced.length()) {
                         val rel = replaced.getString(i)
                         val saved = File(backupDir, rel)
-                        if (saved.isFile && Root.writeBytes("$dir/$rel", saved.readBytes()).ok) log("  restored $rel")
+                        if (saved.isFile && Storage.writeBytes("$dir/$rel", saved.readBytes()).ok) log("  restored $rel")
                     }
                     val dirs = t.getJSONArray("dirs")
-                    for (i in dirs.length() - 1 downTo 0) Root.removeEmptyDir("$dir/${dirs.getString(i)}")
+                    for (i in dirs.length() - 1 downTo 0) Storage.removeEmptyDir("$dir/${dirs.getString(i)}")
                     backupDir.deleteRecursively()
                 } else if (t.has("iniKeyPath")) {
                     val path = t.getString("iniKeyPath")
-                    val text = Root.readText(path) ?: continue
+                    val text = Storage.readText(path) ?: continue
                     Ini.setAnywhere(text, t.getString("key"), t.getString("old"))?.let { write(path, it) }
                     log("  restored ${t.getString("key")}")
                 } else if (t.has("regPath")) {
                     val path = t.getString("regPath")
-                    var text = Root.readText(ctx, path) ?: continue
+                    var text = Storage.readText(path) ?: continue
                     val key = t.getString("key")
                     val prev = t.getJSONObject("prev")
                     for (name in prev.keys()) {
@@ -342,7 +333,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                     log("  restored registry values")
                 } else if (t.has("path")) {
                     val path = t.getString("path")
-                    var text = Root.readText(ctx, path) ?: continue
+                    var text = Storage.readText(path) ?: continue
                     val prev = t.getJSONObject("prev")
                     for (sec in prev.keys()) {
                         val kv = prev.getJSONObject(sec)
@@ -359,7 +350,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
 
         state.optJSONObject("launch")?.let { launch ->
             for (cfg in launch.keys()) {
-                val text = Root.readText(ctx, cfg) ?: continue
+                val text = Storage.readText(cfg) ?: continue
                 val p = launch.getJSONObject(cfg)
                 val path = STEAM_APPS + scope
                 val updated = if (p.optBoolean("absent")) Vdf.remove(text, path, "LaunchOptions")
@@ -370,7 +361,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         }
 
         state.optJSONObject("env")?.let { envPrev ->
-            val text = Root.readText(ctx, dd.envFile)
+            val text = Storage.readText(dd.envFile)
             val env = EnvFile.parseOrNew(text)
             val prev = buildMap<String, EnvFile.Prev> { envPrev.keys().forEach { put(it, EnvFile.Prev.fromJson(envPrev.getJSONObject(it))) } }
             EnvFile.restore(env, scope, prev)
@@ -384,18 +375,18 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
     fun status(game: Game): String {
         val sb = StringBuilder()
         val scope = game.steamAppId.toString()
-        val env = runCatching { EnvFile.parseOrNew(Root.readText(ctx, dd.envFile)) }.getOrNull()
+        val env = runCatching { EnvFile.parseOrNew(Storage.readText(dd.envFile)) }.getOrNull()
         val entries = env?.let { EnvFile.gameEntries(it, scope) }
         if (entries == null || entries.length() == 0) sb.appendLine("Per-game environment: none (inherits Default profile)")
         else {
             sb.appendLine("Per-game environment (${entries.length()} entries):")
             entries.keys().forEach { k -> sb.appendLine("  $k = ${if (entries.isNull(k)) "(unset)" else entries.getString(k)}") }
         }
-        val proton = runCatching { Root.readText(dd.protonGames) }.getOrNull().orEmpty()
+        val proton = runCatching { Storage.readText(dd.protonGames) }.getOrNull().orEmpty()
         val choice = runCatching { JSONObject(proton).optJSONObject("games")?.optJSONObject(scope) }.getOrNull()
         sb.appendLine("Proton: " + (choice?.let { "${it.optString("dir")} (per-game)" } ?: "inherits Default profile"))
         for (cfg in dd.localConfigs()) {
-            val text = Root.readText(ctx, cfg) ?: continue
+            val text = Storage.readText(cfg) ?: continue
             val lo = Vdf.get(text, STEAM_APPS + scope, "LaunchOptions")
             sb.appendLine("Launch options: ${if (lo.isNullOrEmpty()) "(none)" else lo}")
         }

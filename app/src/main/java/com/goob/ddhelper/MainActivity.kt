@@ -16,6 +16,11 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.Settings
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
@@ -27,7 +32,18 @@ class MainActivity : AppCompatActivity() {
     private val main = Handler(Looper.getMainLooper())
     private lateinit var games: List<Game>
     private var dd: DroidDeck? = null
-    private var rootOk = false
+    /** True once DroidDeck's folder is granted and readable. */
+    private var connected = false
+    /** Steam libraries DroidDeck registered on shared/SD storage that haven't been granted yet. */
+    private var missingLibraries: List<String> = emptyList()
+    private val scanReports = HashMap<String, String>()
+    private lateinit var grantBtn: MaterialButton
+
+    /** Android's folder picker. Opens on DroidDeck's folder, or on a Steam library that needs a grant. */
+    private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        android.util.Log.i("DDHelper", "folder picker returned: $uri")
+        if (uri != null) onFolderPicked(uri)
+    }
 
     private lateinit var accessText: TextView
     private lateinit var logText: TextView
@@ -87,7 +103,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             addView(header); addView(accessText)
         }
-        val grantBtn = outlined("Grant access").apply { withIcon(R.drawable.ic_lock_open); setOnClickListener { requestAccess() } }
+        grantBtn = outlined("Choose DroidDeck folder").apply { withIcon(R.drawable.ic_lock_open); setOnClickListener { onGrantButton() } }
         val openBtn = outlined("Open DroidDeck").apply { withIcon(R.drawable.ic_launch); setOnClickListener { openDroidDeck() } }
         val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
         // Landscape (the Thor's main screen): title left, buttons right. Narrow/portrait: buttons go
@@ -234,7 +250,7 @@ class MainActivity : AppCompatActivity() {
             r.status.text = buildString {
                 append(
                     when {
-                        !scanned -> "Install: grant DroidDeck access to check"
+                        !scanned -> "Install: choose DroidDeck's folder to check"
                         installed -> "Installed ✓ " + install!!.gameDir.substringAfter("/steamapps/common/")
                         else -> "Not installed in DroidDeck"
                     }
@@ -269,65 +285,133 @@ class MainActivity : AppCompatActivity() {
 
     private fun busy(b: Boolean) = main.post { working = b; refreshButtons() }
 
-    private val consentPrefs get() = getSharedPreferences("access", MODE_PRIVATE)
+    private val accessPrefs get() = getSharedPreferences("access", MODE_PRIVATE)
 
-    /** Shows exactly what the app will touch, once per DroidDeck package, before asking for root. */
+    private fun hasPersistedGrant(uri: Uri) =
+        contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission && it.isWritePermission }
+
+    /** Reconnects with a remembered grant, or explains and opens the picker on DroidDeck's folder. */
     private fun requestAccess() {
-        val found = DroidDeck.detect(this)
-        val d = found.firstOrNull()
+        val d = DroidDeck.detect(this).firstOrNull()
         if (d == null) {
             accessText.text = "DroidDeck isn't installed. Install it and set up its Linux runtime first."
             return
         }
-        if (consentPrefs.getBoolean(d.pkg, false)) {
-            checkAccess(d); return
+        dd = d
+        val saved = accessPrefs.getString("tree:${d.pkg}", null)?.let(Uri::parse)
+        if (saved != null && hasPersistedGrant(saved)) {
+            connect(d, saved); return
         }
+        accessText.text = "No access yet. Tap Choose DroidDeck folder."
         AlertDialog.Builder(this)
-            .setTitle("Allow access to DroidDeck's folder?")
+            .setTitle("Choose DroidDeck's folder")
             .setMessage(
-                "DroidDeck keeps its settings in its private folder, which Android only lets other apps reach " +
-                    "with root. This app will only read and change files in:\n\n" +
-                    "• ${d.files}  (DroidDeck's settings, Steam config and games)\n" +
-                    "• Steam library folders DroidDeck itself has registered, if you installed games to shared or SD-card storage\n\n" +
-                    "Anything else is refused. When your root manager supports it, file changes run as DroidDeck's own " +
-                    "user, so Android blocks every other app's data. The one other root command closes DroidDeck before applying.\n\n" +
-                    "Your root manager will ask you to approve next."
+                "This app reads and changes DroidDeck's settings through Android's file picker. No root is needed.\n\n" +
+                    "Next, the picker opens on DroidDeck's folder. If it doesn't, tap the menu (☰) and pick \"DroidDeck\". " +
+                    "Then tap \"Use this folder\" and \"Allow\".\n\n" +
+                    "Android only lets this app into the folder you choose: DroidDeck's settings, its Steam config and the " +
+                    "games installed inside it. If you keep Steam games on shared storage or an SD card, the app asks for " +
+                    "that library folder separately."
             )
-            .setPositiveButton("Allow") { _, _ ->
-                consentPrefs.edit().putBoolean(d.pkg, true).apply()
-                checkAccess(d)
-            }
-            .setNegativeButton("Not now") { _, _ ->
-                accessText.text = "No access yet. Tap Grant access when you're ready."
-            }
+            .setPositiveButton("Open picker") { _, _ -> pickFolder.launch(d.providerRoot) }
+            .setNegativeButton("Not now", null)
             .show()
     }
 
-    private fun checkAccess(d: DroidDeck) {
-        accessText.text = "Requesting root… (approve the prompt from Magisk/KernelSU/APatch)"
+    private fun onGrantButton() {
+        val d = dd ?: return requestAccess()
+        val lib = missingLibraries.firstOrNull()
+        if (connected && lib != null) {
+            val docId = if (lib.startsWith("/storage/emulated/0")) "primary:" + lib.removePrefix("/storage/emulated/0").trimStart('/')
+            else lib.removePrefix("/storage/").substringBefore('/') + ":" + lib.removePrefix("/storage/").substringAfter('/', "")
+            AlertDialog.Builder(this)
+                .setTitle("Grant a Steam library folder")
+                .setMessage("DroidDeck has a Steam library at:\n\n$lib\n\nIn the picker, open that folder, then tap \"Use this folder\" and \"Allow\".")
+                .setPositiveButton("Open picker") { _, _ ->
+                    pickFolder.launch(DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", docId))
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else {
+            pickFolder.launch(d.providerRoot)
+        }
+    }
+
+    private fun onFolderPicked(uri: Uri) {
+        // The screen may have been rebuilt while the picker was open (Android can kill the app then).
+        val d = dd ?: DroidDeck.detect(this).firstOrNull()?.also { dd = it } ?: return
+        val base = Storage.basePathOf(uri)
+        android.util.Log.i("DDHelper", "picked authority=${uri.authority} base=$base expected=${d.authority}")
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        when {
+            uri.authority == d.authority && base != null && (base.endsWith("/${d.pkg}") || base.endsWith("/${d.pkg}/files")) -> {
+                runCatching { contentResolver.takePersistableUriPermission(uri, flags) }
+                accessPrefs.edit().putString("tree:${d.pkg}", uri.toString()).apply()
+                connect(d, uri)
+            }
+            uri.authority == "com.android.externalstorage.documents" && base != null && connected -> {
+                runCatching { contentResolver.takePersistableUriPermission(uri, flags) }
+                val libs = accessPrefs.getStringSet("libraries", emptySet())!!.toMutableSet().apply { add(uri.toString()) }
+                accessPrefs.edit().putStringSet("libraries", libs).apply()
+                connect(d, Uri.parse(accessPrefs.getString("tree:${d.pkg}", null)!!))
+            }
+            else -> AlertDialog.Builder(this)
+                .setTitle("That's not DroidDeck's folder")
+                .setMessage("Pick the folder called \"DroidDeck\" (from the picker's ☰ menu) itself, not a folder inside it or somewhere else.")
+                .setPositiveButton("Try again") { _, _ -> pickFolder.launch(d.providerRoot) }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    }
+
+    /** Sets up storage from the saved grants, then checks which games are installed. */
+    private fun connect(d0: DroidDeck, tree: Uri) {
+        accessText.text = "Connecting to DroidDeck's folder…"
         thread {
-            rootOk = Root.available()
-            if (!rootOk) {
-                main.post { accessText.text = "Root not granted. Approve it in your root manager, then tap Grant access." }
+            val base = Storage.basePathOf(tree)!!
+            val data = if (base.endsWith("/files")) base.removeSuffix("/files") else base
+            val d = d0.withData(data)
+            val libTrees = accessPrefs.getStringSet("libraries", emptySet())!!.map(Uri::parse).filter(::hasPersistedGrant)
+            val mounts = listOf(Storage.Mount(base, tree)) + libTrees.mapNotNull { t -> Storage.basePathOf(t)?.let { Storage.Mount(it, t) } }
+            Scope.setDroidDeck(d.pkg, data)
+            Storage.init(this, mounts)
+            if (!Storage.isDir(d.files)) {
+                main.post {
+                    connected = false
+                    accessText.text = "Access was granted, but DroidDeck's files folder can't be read. Tap Choose DroidDeck folder and pick the \"DroidDeck\" folder itself."
+                    grantBtn.text = "Choose DroidDeck folder"
+                }
                 return@thread
             }
-            dd = d
-            d.grantScopedAccess()
-            val mode = Root.droidDeckUid?.let { "running as DroidDeck's user (uid $it)" } ?: "root, limited to DroidDeck's folders"
-            main.post { accessText.text = "Access: DroidDeck ${d.versionName ?: ""} folder only · $mode\nChecking which games are installed…" }
+            // Registered Steam libraries on shared/SD storage: usable only once their folder is granted too.
+            val external = d.externalLibraries()
+            val granted = external.filter { Storage.isGranted(it) }
+            Scope.setLibraries(granted)
+            main.post {
+                dd = d; connected = true
+                missingLibraries = external - granted.toSet()
+                grantBtn.text = if (missingLibraries.isEmpty()) "Change folder" else "Grant library folder"
+                accessText.text = "Access: DroidDeck ${d.versionName ?: ""} folder (no root)\nChecking which games are installed…"
+            }
             scanInstalls(d)
             main.post {
                 val n = installs.values.count { it != null }
-                accessText.text = "Access: DroidDeck ${d.versionName ?: ""} folder only · $mode\n$n of ${games.size} games found in DroidDeck"
+                accessText.text = buildString {
+                    append("Access: DroidDeck ${d.versionName ?: ""} folder (no root) · $n of ${games.size} games found")
+                    if (missingLibraries.isNotEmpty()) append("\nDroidDeck also has a Steam library at ${missingLibraries.first()}. Tap Grant library folder so games there are found too.")
+                }
             }
             loadArtFromDroidDeck(d)
         }
     }
 
-    /** Looks for each game's own install folder (appmanifest + folder + executable) inside DroidDeck. */
+    /** Looks for each game's own install (appmanifest + folder + executable) and keeps the reasons. */
     private fun scanInstalls(d: DroidDeck) {
         for (g in games) {
-            val install = runCatching { d.findInstall(g) }.getOrNull()
+            val report = DroidDeck.ScanReport()
+            val install = runCatching { d.findInstall(g, report) }.getOrElse { report.add("Error: ${it.message}"); null }
+            scanReports[g.id] = report.toString()
+            log("${g.name}: " + (if (install != null) "found" else "not found") + "\n  " + report.lines.joinToString("\n  "))
             main.post { installs[g.id] = install; refreshButtons() }
         }
     }
@@ -360,8 +444,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun requireReady(): DroidDeck? {
         val d = dd
-        if (!rootOk || d == null) {
-            AlertDialog.Builder(this).setMessage("Tap Grant access first so the app can reach DroidDeck's folder.")
+        if (!connected || d == null) {
+            AlertDialog.Builder(this).setMessage("Tap Choose DroidDeck folder first so the app can reach DroidDeck's settings.")
                 .setPositiveButton("OK", null).show()
             return null
         }
@@ -379,14 +463,13 @@ class MainActivity : AppCompatActivity() {
         val d = requireReady() ?: return
         if (isApplied(g, pack)) confirm(
             "Revert ${pack.short} for ${g.name}?",
-            "Puts back exactly what this app changed for ${pack.name} and closes DroidDeck.",
-            "Revert",
+            "Puts back exactly what this app changed for ${pack.name}.\n\n$CLOSE_FIRST",
+            "Revert", d,
         ) { run(d) { it.revert(g, pack) } }
         else confirm(
             if (pack.kind == Pack.SETTINGS) "Apply the best settings for ${g.name}?" else "${pack.name} for ${g.name}?",
-            describe(pack) + "\n\nDroidDeck will be force-closed first, which ends any running Steam session. " +
-                "Your files are backed up, and tapping again reverts everything.",
-            "Apply",
+            describe(pack) + "\n\n$CLOSE_FIRST\n\nYour files are backed up, and tapping again reverts everything.",
+            "Apply", d,
         ) { run(d) { it.apply(g, pack) } }
     }
 
@@ -399,11 +482,21 @@ class MainActivity : AppCompatActivity() {
         p.tweaks.forEach { append("\n• ${it.name}") }
     }
 
-    private fun confirm(title: String, msg: String, ok: String, action: () -> Unit) {
+    private fun confirm(title: String, msg: String, ok: String, d: DroidDeck, action: () -> Unit) {
         AlertDialog.Builder(this).setTitle(title).setMessage(msg)
             .setPositiveButton(ok) { _, _ -> action() }
             .setNegativeButton("Cancel", null)
+            // Without root this app can't close DroidDeck itself; Android's App info page can.
+            .setNeutralButton("Force stop DroidDeck") { _, _ ->
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${d.pkg}")))
+            }
             .show()
+    }
+
+    private companion object {
+        const val CLOSE_FIRST = "Close DroidDeck first: if a Steam session is running, Steam rewrites its config when it " +
+            "exits and can undo the change. Tap Force stop DroidDeck to open its App info page, tap Force stop, " +
+            "then come back here."
     }
 
     private fun run(d: DroidDeck, action: (Applier) -> Unit) {
@@ -433,13 +526,14 @@ class MainActivity : AppCompatActivity() {
             .setView(ScrollView(this).apply { addView(text) })
             .setPositiveButton("Close", null).show()
         val d = dd
-        if (!rootOk || d == null) {
-            text.text = base + "\n\nCURRENT STATE\nGrant root to read DroidDeck's current settings."
+        if (!connected || d == null) {
+            text.text = base + "\n\nCURRENT STATE\nChoose DroidDeck's folder to read its current settings."
             return
         }
+        val scan = scanReports[g.id]?.let { "\n\nINSTALL CHECK\n$it" }.orEmpty()
         thread {
             val s = runCatching { applier(d).status(g) }.getOrElse { "Could not read status: ${it.message}" }
-            main.post { text.text = base + "\n\nCURRENT STATE\n" + s }
+            main.post { text.text = base + scan + "\n\nCURRENT STATE\n" + s }
         }
     }
 

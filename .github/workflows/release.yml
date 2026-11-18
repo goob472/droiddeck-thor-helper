@@ -43,7 +43,8 @@ jobs:
           chmod +x gradlew
           VERSION="1.0.${{ github.run_number }}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          ./gradlew --no-daemon testReleaseUnitTest assembleRelease \
+          # Only the helper app is built and released; :fakedroiddeck is an emulator test fixture.
+          ./gradlew --no-daemon :app:testReleaseUnitTest :app:assembleRelease \
             -PversionCode=${{ github.run_number }} -PversionName=$VERSION
           mkdir -p out
           cp app/build/outputs/apk/release/app-release.apk "out/DDThorHelper-v$VERSION.apk"
