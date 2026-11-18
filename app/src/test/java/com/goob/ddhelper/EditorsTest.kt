@@ -107,7 +107,7 @@ class EditorsTest {
         assertEquals("full", env["FEX_SMCCHECKS"]); assertEquals("1", env["FEX_HIDEHYPERVISORBIT"])
         assertEquals("1", env["FEX_TSOENABLED"]); assertEquals("1", env["FEX_MULTIBLOCK"])
         GameDb.FEX_KEYS.forEach { assertTrue(env.containsKey(it)) }
-        assertEquals(listOf("skip_intro", "engine_perf"), m.tweaks.map { it.id })
+        assertEquals(listOf("skip_intro", "engine_perf", "no_async_loading"), m.tweaks.map { it.id })
         assertNotNull(m.tweaks.firstOrNull { it.id == "skip_intro" })
     }
 }

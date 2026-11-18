@@ -57,7 +57,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         }
         val state = JSONObject()
             .put("game", game.id).put("kind", pack.kind).put("profile", pack.name).put("pkg", dd.pkg)
-            .put("appliedAt", System.currentTimeMillis())
+            .put("appliedAt", System.currentTimeMillis()).put("fingerprint", pack.fingerprint())
         val scope = game.steamAppId.toString()
 
         // 1. Per-game environment (FEX preset + fixes).

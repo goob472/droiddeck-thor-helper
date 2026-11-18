@@ -230,19 +230,22 @@ class MainActivity : AppCompatActivity() {
             for (pack in r.game.packs) {
                 val btn = r.buttons[pack.kind] ?: continue
                 val on = isApplied(r.game, pack)
+                val outdated = on && isOutdated(r.game, pack)
                 btn.text = when {
                     pack.manual != null -> "${pack.short.replaceFirstChar { it.uppercase() }}: how-to"
+                    outdated -> if (pack.kind == Pack.SETTINGS) "Update settings" else "Update ${pack.short}"
                     pack.kind == Pack.SETTINGS -> if (on) "Revert settings" else "Apply best settings"
                     on -> "Revert ${pack.short}"
                     else -> "Apply ${pack.short}"
                 }
-                btn.withIcon(iconFor(pack, on))
+                btn.withIcon(if (outdated) R.drawable.ic_refresh else iconFor(pack, on))
                 // Applying needs the game's install folder in DroidDeck. Reverting stays possible after an
                 // uninstall so changes can always be undone, and a how-to only shows text.
                 btn.isEnabled = !working && (pack.manual != null || installed || (scanned && on))
                 val label = if (pack.kind == Pack.SETTINGS) "Settings" else pack.short.replaceFirstChar { it.uppercase() }
                 states += "$label: " + when {
                     pack.manual != null -> "in-game"
+                    outdated -> "older version applied"
                     on -> "applied ✓"
                     else -> if (pack.kind == Pack.SETTINGS) "not applied" else "off"
                 }
@@ -259,6 +262,16 @@ class MainActivity : AppCompatActivity() {
             }
             r.status.alpha = if (scanned && !installed) 0.55f else 0.8f
         }
+    }
+
+    /**
+     * True when the applied version of [p] differs from the one bundled now (or predates fingerprints),
+     * so the button offers to update it.
+     */
+    private fun isOutdated(g: Game, p: Pack): Boolean {
+        val f = File(filesDir, "applied/" + if (p.kind == Pack.SETTINGS) "${g.id}.json" else "${g.id}.${p.kind}.json")
+        val saved = runCatching { org.json.JSONObject(f.readText()).optString("fingerprint") }.getOrDefault("")
+        return saved != p.fingerprint()
     }
 
     /** Glyph for a pack button: what it will do next (apply something, revert, or show a how-to). */
@@ -461,7 +474,19 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val d = requireReady() ?: return
-        if (isApplied(g, pack)) confirm(
+        if (isApplied(g, pack) && isOutdated(g, pack)) {
+            // A newer profile is bundled: re-applying reverts the old one first, then applies the new one.
+            AlertDialog.Builder(this)
+                .setTitle("Update ${pack.short} for ${g.name}?")
+                .setMessage("This version of the app has a newer ${pack.name.lowercase()} profile. Updating puts back what the " +
+                    "old one changed, then applies the new one.\n\n" + describe(pack) + "\n\n$CLOSE_FIRST")
+                .setPositiveButton("Update") { _, _ -> run(d) { it.apply(g, pack) } }
+                .setNegativeButton("Revert instead") { _, _ -> run(d) { it.revert(g, pack) } }
+                .setNeutralButton("Force stop DroidDeck") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${d.pkg}")))
+                }
+                .show()
+        } else if (isApplied(g, pack)) confirm(
             "Revert ${pack.short} for ${g.name}?",
             "Puts back exactly what this app changed for ${pack.name}.\n\n$CLOSE_FIRST",
             "Revert", d,

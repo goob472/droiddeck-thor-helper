@@ -67,18 +67,18 @@ To add a game, add an entry to that file. No code changes are needed.
 
 ### Maneater (629820)
 
-Unreal Engine 4.25, Direct3D 11, **Denuvo**. It hangs on the spinning-shark loading screen.
+Unreal Engine 4.25, Direct3D 11, **Denuvo**. It hangs on the spinning-shark loading screen. The v2 profile
+(after v1 still hung) targets that hang three ways:
 
-* All profiles set `FEX_SMCCHECKS=full` and `FEX_HIDEHYPERVISORBIT=1`, the two settings DroidDeck's Denuvo preset uses.
-  Denuvo relies on self-modifying code, and FEX's faster presets skip the checks that catch it.
-* `OPENSSL_ia32cap=:~0x20000000` stops the game's old bundled OpenSSL from using the CPU's SHA
-  extensions. That is the Steam community fix for Maneater freezing or crashing at startup.
-* FEX: main TSO on (UE4's loading threads can deadlock without it), with vector and memcpy TSO off and
-  multiblock on for speed. This combines DroidDeck's Denuvo preset with its Performance + TSO preset.
-* Also skips the intro MP4s (renamed, not deleted), applies handheld `Engine.ini` tweaks (no motion blur,
-  depth of field, chromatic aberration or lens flares, and lighter volumetric fog), and adds
-  `-USEALLAVAILABLECORES` to the Steam launch options.
+* **Audio:** PulseAudio with 100 ms latency (`WINE_AUDIO_DRIVER=pulse`, `PULSE_LATENCY_MSEC=100`) instead of
+  DroidDeck's DirectAudio. A ProtonDB report of this exact hang was fixed with `PULSE_LATENCY_MSEC=100`.
+* **Threads:** all of FEX's memory-ordering emulation (TSO) on, plus full x87 precision.
+* **Loading:** Unreal's async loading thread off (`s.AsyncLoadingThreadEnabled=False` in `Engine.ini`).
+* Kept from v1: `FEX_SMCCHECKS=full` and `FEX_HIDEHYPERVISORBIT=1` for Denuvo, `OPENSSL_ia32cap=:~0x20000000`,
+  skipped intro MP4s, handheld `Engine.ini` tweaks, and `-USEALLAVAILABLECORES`.
 
+When a newer profile is bundled than the one applied, the game's button reads **Update settings**, which
+reverts the old profile and applies the new one.
 
 ### Monster Hunter: World (582010)
 

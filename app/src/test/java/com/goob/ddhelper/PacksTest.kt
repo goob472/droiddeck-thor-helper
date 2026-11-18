@@ -67,6 +67,28 @@ class PacksTest {
         assertTrue(games.getValue("dr2").tweaks.isEmpty())
     }
 
+    @Test fun fingerprintTracksProfileChanges() {
+        val s = games.getValue("maneater").settings
+        assertEquals(s.fingerprint(), games.getValue("maneater").settings.fingerprint())
+        val changed = s.copy(env = s.env + ("PULSE_LATENCY_MSEC" to "60"))
+        assertTrue(changed.fingerprint() != s.fingerprint())
+        assertTrue(s.copy(launchOptions = null).fingerprint() != s.fingerprint())
+        assertTrue(s.copy(tweaks = s.tweaks.dropLast(1)).fingerprint() != s.fingerprint())
+        // Every game's packs have distinct fingerprints.
+        for (g in games.values) assertEquals(g.packs.size, g.packs.map { it.fingerprint() }.distinct().size)
+    }
+
+    @Test fun maneaterV2LoadingHangProfile() {
+        val m = games.getValue("maneater")
+        val env = m.settings.env
+        assertEquals("pulse", env["WINE_AUDIO_DRIVER"]); assertEquals("100", env["PULSE_LATENCY_MSEC"])
+        assertEquals("1", env["FEX_VECTORTSOENABLED"]); assertEquals("1", env["FEX_MEMCPYSETTSOENABLED"])
+        assertEquals("full", env["FEX_SMCCHECKS"]); assertEquals("1", env["FEX_HIDEHYPERVISORBIT"])
+        val async = m.tweaks.single { it.id == "no_async_loading" }.json.getJSONObject("sections")
+            .getJSONObject("/Script/Engine.StreamingSettings")
+        assertEquals("False", async.getString("s.AsyncLoadingThreadEnabled"))
+    }
+
     @Test fun hitmanHasFeatureLevelWithNodxr() {
         val env = games.getValue("hitman_woa").settings.env
         assertEquals("nodxr", env["VKD3D_CONFIG"]); assertEquals("12_1", env["VKD3D_FEATURE_LEVEL"])

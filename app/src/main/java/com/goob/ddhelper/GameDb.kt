@@ -27,6 +27,19 @@ data class Pack(
     /** Short label for the button: "Apply <short>" / "Revert <short>". */
     val short: String = name,
 ) {
+    /**
+     * Identifies exactly what this pack changes. Recorded when applied, so the app can tell when an
+     * update brings a newer profile and offer to re-apply it.
+     */
+    fun fingerprint(): String {
+        val sb = StringBuilder()
+        env.toSortedMap().forEach { (k, v) -> sb.append(k).append('=').append(v ?: "\u0000").append('\n') }
+        sb.append("launch=").append(launchOptions ?: "").append('\n')
+        tweaks.forEach { sb.append(it.json.toString()).append('\n') }
+        return java.security.MessageDigest.getInstance("SHA-256").digest(sb.toString().toByteArray())
+            .take(12).joinToString("") { "%02x".format(it) }
+    }
+
     companion object {
         const val SETTINGS = "settings"
         const val UI = "ui"
