@@ -119,6 +119,8 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                     "renameFiles" -> tweaksState.put(t.id, renameFiles(install, t))
                     "iniMerge" -> iniMerge(install, t)?.let { tweaksState.put(t.id, it) }
                     "wineReg" -> wineReg(install, t)?.let { tweaksState.put(t.id, it) }
+                    "iniKey" -> iniKey(install, t)?.let { tweaksState.put(t.id, it) }
+                    "modZip" -> modZip(game, install, t)?.let { tweaksState.put(t.id, it) }
                     else -> log("Unknown tweak type ${t.type}")
                 }
             } catch (e: Exception) {
@@ -182,6 +184,77 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         return JSONObject().put("path", path).put("prev", prev)
     }
 
+    /**
+     * Changes one key that already exists anywhere in a config file the game wrote, keeping the line's
+     * spacing. Nothing is added: if the file or key isn't there yet, the game hasn't created it.
+     */
+    private fun iniKey(install: DroidDeck.Install, t: Tweak): JSONObject? {
+        val raw = t.json.getString("path")
+        val path = when {
+            raw.startsWith("pfx:") -> install.prefix?.let { dd.resolveIgnoringCase(it, raw.removePrefix("pfx:")) }
+            raw.startsWith("game:") -> dd.resolveIgnoringCase(install.gameDir, raw.removePrefix("game:"))
+            else -> null
+        }
+        val text = path?.let { Root.readText(it) }
+        if (path == null || text == null) {
+            log("  ${t.name}: the game hasn't created its settings file yet. Launch it once, quit, then apply again.")
+            return null
+        }
+        val key = t.json.getString("key")
+        val value = t.json.getString("value")
+        val old = Ini.getAnywhere(text, key)
+        val updated = Ini.setAnywhere(text, key, value)
+        if (old == null || updated == null) {
+            log("  ${t.name}: $key isn't in ${path.substringAfterLast('/')}, left alone."); return null
+        }
+        write(path, updated)
+        log("  $key: $old -> $value")
+        return JSONObject().put("iniKeyPath", path).put("key", key).put("old", old)
+    }
+
+    /**
+     * Installs a mod from its author's official release: downloads the zip, checks its SHA-256 against
+     * the pinned value, and copies its files into the game folder. Any file it would replace is backed
+     * up first, and every file and folder it adds is recorded so revert removes exactly those.
+     */
+    private fun modZip(game: Game, install: DroidDeck.Install, t: Tweak): JSONObject? {
+        val url = t.json.getString("url")
+        val sha = t.json.getString("sha256").lowercase()
+        log("  Downloading ${url.substringAfterLast('/')}…")
+        val zip = ModDownload.fetch(url, sha) ?: run {
+            log("  Download failed or the file didn't match its checksum, so nothing was installed."); return null
+        }
+        val entries = ModDownload.unzip(zip)
+        val backupDir = File(ctx.filesDir, "mod-backups/${game.id}/${t.id}").apply { deleteRecursively(); mkdirs() }
+        val created = JSONArray()
+        val replaced = JSONArray()
+        val dirs = JSONArray()
+        val record = JSONObject().put("modDir", install.gameDir).put("created", created).put("replaced", replaced).put("dirs", dirs)
+        try {
+            for ((rel, bytes) in entries) {
+                val target = "${install.gameDir}/$rel"
+                // Remember folders this mod creates, deepest last, so revert can remove them if empty.
+                var parent = rel.substringBeforeLast('/', "")
+                val newDirs = ArrayList<String>()
+                while (parent.isNotEmpty() && !Root.isDir("${install.gameDir}/$parent")) {
+                    newDirs += parent; parent = parent.substringBeforeLast('/', "")
+                }
+                newDirs.asReversed().forEach { d -> if ((0 until dirs.length()).none { dirs.getString(it) == d }) dirs.put(d) }
+                val old = Root.readBytes(target)
+                if (old != null) {
+                    File(backupDir, rel).apply { parentFile?.mkdirs() }.writeBytes(old)
+                    replaced.put(rel)
+                } else created.put(rel)
+                val r = Root.writeBytes(target, bytes)
+                if (!r.ok) fail("Could not write $target: ${r.err.trim()}")
+                log("  installed $rel (${bytes.size / 1024} KB)")
+            }
+        } catch (e: Exception) {
+            log("  ${t.name} stopped partway: ${e.message}. Revert removes what was installed.")
+        }
+        return record.put("backupDir", backupDir.absolutePath)
+    }
+
     /** Changes numeric values the game already wrote to its Wine registry hive, keeping their type. */
     private fun wineReg(install: DroidDeck.Install, t: Tweak): JSONObject? {
         val path = iniPath(install, t.json.getString("path"))
@@ -235,6 +308,28 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                         val n = files.getString(i)
                         if (Root.rename("$dir/$n$BAK", "$dir/$n").ok) log("  restored $n")
                     }
+                } else if (t.has("modDir")) {
+                    val dir = t.getString("modDir")
+                    val backupDir = File(t.getString("backupDir"))
+                    val created = t.getJSONArray("created")
+                    for (i in 0 until created.length()) {
+                        val rel = created.getString(i)
+                        if (Root.deleteFile("$dir/$rel").ok) log("  removed $rel")
+                    }
+                    val replaced = t.getJSONArray("replaced")
+                    for (i in 0 until replaced.length()) {
+                        val rel = replaced.getString(i)
+                        val saved = File(backupDir, rel)
+                        if (saved.isFile && Root.writeBytes("$dir/$rel", saved.readBytes()).ok) log("  restored $rel")
+                    }
+                    val dirs = t.getJSONArray("dirs")
+                    for (i in dirs.length() - 1 downTo 0) Root.removeEmptyDir("$dir/${dirs.getString(i)}")
+                    backupDir.deleteRecursively()
+                } else if (t.has("iniKeyPath")) {
+                    val path = t.getString("iniKeyPath")
+                    val text = Root.readText(path) ?: continue
+                    Ini.setAnywhere(text, t.getString("key"), t.getString("old"))?.let { write(path, it) }
+                    log("  restored ${t.getString("key")}")
                 } else if (t.has("regPath")) {
                     val path = t.getString("regPath")
                     var text = Root.readText(ctx, path) ?: continue
@@ -307,8 +402,10 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         val install = dd.findInstall(game)
         sb.appendLine("Install: " + (install?.gameDir ?: "not found"))
         if (install != null) sb.appendLine("Proton prefix: " + (install.prefix ?: "not created yet (launch once)"))
-        sb.appendLine("Best settings: " + if (appliedState(game) != null) "APPLIED" else "not applied")
-        game.ui?.let { sb.appendLine("UI mod: " + if (it.manual != null) "in-game only" else if (appliedState(game, Pack.UI) != null) "APPLIED" else "not applied") }
+        for (p in game.packs) {
+            val label = p.short.replaceFirstChar { it.uppercase() }
+            sb.appendLine("$label: " + if (p.manual != null) "in-game only" else if (appliedState(game, p.kind) != null) "APPLIED" else "not applied")
+        }
         return sb.toString().trimEnd()
     }
 

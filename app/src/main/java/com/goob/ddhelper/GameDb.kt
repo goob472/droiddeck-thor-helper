@@ -24,10 +24,14 @@ data class Pack(
     val tweaks: List<Tweak>,
     /** When set, nothing can be changed from outside the game; this explains what to do in-game. */
     val manual: String? = null,
+    /** Short label for the button: "Apply <short>" / "Revert <short>". */
+    val short: String = name,
 ) {
     companion object {
         const val SETTINGS = "settings"
         const val UI = "ui"
+        private val KIND = Regex("[a-z][a-z0-9_]{0,23}")
+        fun validKind(kind: String) = KIND.matches(kind)
     }
 }
 
@@ -45,9 +49,14 @@ data class Game(
     val ui: Pack? = null,
     /** Files inside the install folder that prove the game is really installed (any one is enough). */
     val detectFiles: List<String> = emptyList(),
+    /** Further optional packs, each with its own button (for example a controller fix). */
+    val extras: List<Pack> = emptyList(),
 ) {
     val settings: Pack
-        get() = Pack(Pack.SETTINGS, "Best settings", profile.description, GameDb.environment(this), launchOptions, tweaks)
+        get() = Pack(Pack.SETTINGS, "Best settings", profile.description, GameDb.environment(this), launchOptions, tweaks, short = "best settings")
+
+    /** Every pack in button order: settings, UI mod, then extras. */
+    val packs: List<Pack> get() = listOf(settings) + listOfNotNull(ui) + extras
 }
 
 object GameDb {
@@ -85,16 +94,24 @@ object GameDb {
                 profile = Variant("best", profile.getString("name"), profile.optString("description"), strMap(profile.optJSONObject("fex"))),
                 tweaks = tweaks(tweaks),
                 detectFiles = strList(g.optJSONArray("detectFiles")),
-                ui = ui?.let {
-                    Pack(
-                        Pack.UI, it.getString("name"), it.optString("description"), strMap(it.optJSONObject("env")),
-                        it.optString("launchOptions").ifEmpty { null }, tweaks(it.optJSONArray("tweaks") ?: JSONArray()),
-                        it.optString("manual").ifEmpty { null },
-                    )
+                ui = ui?.let { pack(Pack.UI, it, "UI mod") },
+                extras = (g.optJSONArray("extras") ?: JSONArray()).let { a ->
+                    (0 until a.length()).map { j ->
+                        val p = a.getJSONObject(j)
+                        val kind = p.getString("kind")
+                        require(Pack.validKind(kind) && kind != Pack.SETTINGS && kind != Pack.UI) { "Bad pack kind $kind" }
+                        pack(kind, p, p.optString("short").ifEmpty { kind })
+                    }
                 },
             )
         }
     }
+
+    private fun pack(kind: String, p: JSONObject, short: String) = Pack(
+        kind, p.getString("name"), p.optString("description"), strMap(p.optJSONObject("env")),
+        p.optString("launchOptions").ifEmpty { null }, tweaks(p.optJSONArray("tweaks") ?: JSONArray()),
+        p.optString("manual").ifEmpty { null }, p.optString("short").ifEmpty { short },
+    )
 
     private fun tweaks(a: JSONArray): List<Tweak> = (0 until a.length()).map { j ->
         val t = a.getJSONObject(j)

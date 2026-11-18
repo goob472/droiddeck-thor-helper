@@ -74,12 +74,28 @@ class DroidDeck(val pkg: String, val versionName: String?) {
             if (dirName.contains('/') || dirName == "..") continue
             val gameDir = "$lib/steamapps/common/$dirName"
             if (!runCatching { Root.isDir(gameDir) }.getOrDefault(false)) continue
-            if (detectFiles.isNotEmpty() &&
-                detectFiles.none { f -> !f.contains("..") && runCatching { Root.isFile("$gameDir/$f") }.getOrDefault(false) }
-            ) continue
+            if (detectFiles.isNotEmpty() && detectFiles.none { f -> resolveIgnoringCase(gameDir, f) != null }) continue
             val pfx = listOf("$lib/steamapps/compatdata/$appId/pfx", "${steamRoots[0]}/steamapps/compatdata/$appId/pfx")
                 .firstOrNull { runCatching { Root.isDir(it) }.getOrDefault(false) }
             return Install(lib, gameDir, pfx)
+        }
+        return null
+    }
+
+    /**
+     * Finds [rel] under [dir] ignoring letter case, the way Windows (and so the game) sees its own
+     * files on DroidDeck's case-sensitive Linux file system. Returns the real path of an existing file.
+     */
+    fun resolveIgnoringCase(dir: String, rel: String): String? {
+        if (rel.isEmpty() || rel.startsWith("/") || rel.split('/').any { it.isEmpty() || it == "." || it == ".." }) return null
+        if (runCatching { Root.isFile("$dir/$rel") }.getOrDefault(false)) return "$dir/$rel"
+        var cur = dir
+        val parts = rel.split('/')
+        for ((i, part) in parts.withIndex()) {
+            val match = runCatching { Root.list(cur) }.getOrDefault(emptyList()).firstOrNull { it.equals(part, ignoreCase = true) }
+                ?: return null
+            cur = "$cur/$match"
+            if (i == parts.lastIndex) return cur.takeIf { runCatching { Root.isFile(it) }.getOrDefault(false) }
         }
         return null
     }

@@ -46,6 +46,8 @@ the left, two buttons on the right:
 * **Apply best settings / Revert settings**: the compatibility and performance profile below.
 * **Apply UI mod / Revert UI mod**: makes the game's UI larger and easier to read on the Thor's
   6-inch screen. It is applied and reverted separately from the settings.
+* **Apply controller fix / Revert controller fix** (Dead Rising games): installs a community fix mod
+  from its author's official GitHub release, after checking its SHA-256.
 
 Tap a game's title for the full list of changes, notes, and what DroidDeck currently has for it.
 
@@ -54,6 +56,7 @@ Tap a game's title for the full list of changes, notes, and what DroidDeck curre
 | Maneater | `ApplicationScale=1.25` under `[/Script/Engine.UserInterfaceSettings]` in `Engine.ini` (Unreal Engine's own UI scale) |
 | HITMAN WoA | `SteamDeck=1` for the game only. This turns on HITMAN's built-in small-display mode: interaction prompts at twice the default size, larger HUD and menu text, prompts and objectives scaled ×1.2–1.5 |
 | Monster Hunter: World | Not possible from outside the game. Its text and HUD sizes are stored in the encrypted save, so the button explains the in-game options instead |
+| Dead Rising 2 / Off the Record | No UI scale exists in these games, so the button explains what helps in-game |
 
 ## Games
 
@@ -89,11 +92,29 @@ MT Framework, no Denuvo (removed in 2021). Very CPU-heavy.
 Glacier 2, Direct3D 12 only (VKD3D-Proton), no Denuvo.
 
 * Launch options `%command% -skip_launcher`.
-* `VKD3D_CONFIG=nodxr` hides ray tracing, the main cause of freezes under Proton. `VKD3D_FRAME_RATE=30`
+* `VKD3D_CONFIG=nodxr` with `VKD3D_FEATURE_LEVEL=12_1` hides ray tracing, the main cause of freezes and
+  a startup crash under Proton (DroidDeck #1293). `VKD3D_FRAME_RATE=30`
   caps the frame rate for stability.
 * FEX: Performance + TSO.
 * Render scale is set to 75% through the `SuperSampling` registry value in the prefix's `user.reg`.
   Only values the game already wrote are changed, keeping their type.
+
+### Dead Rising 2 (45740) and Dead Rising 2: Off the Record (45770)
+
+Forge engine, 32-bit Direct3D 9 through DXVK.
+
+* FEX: Performance + TSO.
+* Audio crackling: DirectAudio gets a bigger buffer for these games only (`AUDIO_DIRECT_MS=100`,
+  `AUDIO_DIRECT_PERIOD_MS=25`, up from 60/20 on the Thor). If it still crackles, DroidDeck's documented
+  fallback is `WINE_AUDIO_DRIVER=pulse` + `PULSE_LATENCY_MSEC=60` in its Game environment. No older DXVK is
+  pinned: nothing ties it to this crackling, and ClownDR2Fix needs a recent DXVK.
+* `DXVK_CONFIG=d3d9.maxFrameRate = 60`: some gameplay runs too fast above 60 FPS.
+* Off the Record: `UseMultiCore = false` in `rendersettings.ini` fixes the endless loading screen at Case 7-4.
+  Only an existing key is changed, keeping the file's own spacing.
+* **Controller fix**: downloads [ClownDR2Fix](https://github.com/Clownacy/ClownDR2Fix) v1.5.0.1 from its
+  GitHub release, checks its SHA-256, and copies its 4 files into the game folder, with
+  `WINEDLLOVERRIDES=dinput8=n,b` for that game. Without it, the games only detect an official Xbox 360 pad.
+  Nothing is bundled with this app, and revert removes exactly the files it added.
 
 ## Install and update with Obtainium
 

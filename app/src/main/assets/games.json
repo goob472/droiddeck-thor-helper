@@ -172,20 +172,23 @@
       "notes": [
         "-skip_launcher goes straight into the game. On Proton the IOI launcher often fails, or doesn't take controller input, and several ProtonDB players say the game would not start without it.",
         "VKD3D_CONFIG=nodxr hides DirectX Raytracing from the game. ProtonDB reports consistently tie freezes within minutes of starting a mission to ray tracing, and the Adreno 740 can't afford it anyway.",
+        "VKD3D_FEATURE_LEVEL=12_1 goes with nodxr. DroidDeck issue #1293 shows HITMAN still crashes at startup when an older DroidDeck setup forces feature level 12_2, which advertises ray tracing the Adreno GPU can't run. 12_1 keeps it hidden.",
         "VKD3D_FRAME_RATE=30 caps the game at a steady 30 fps. Several players found that capping the frame rate cut down hard freezes on loads and picture-in-picture, and under FEX the Thor won't hold much more in big levels like Marrakesh or Mumbai. Remove it in DroidDeck's Game environment if you want to experiment.",
         "FEX uses DroidDeck's Performance + TSO preset. Glacier is heavily multithreaded and needs main TSO to avoid deadlocks.",
         "Render scale is set to 75% through the game's SuperSampling registry value. This only works after the game has run once, so launch once, quit, and apply again if the log says the value isn't set yet. Changing graphics in the game can reset it.",
         "Set graphics to Low or Medium in the game's options, with ray tracing off and no frame generation. The first mission load compiles shaders and takes a while.",
-        "Progression needs IOI's servers. If you get disconnected mid-mission, use Retry. Offline saves are separate from online ones."
+        "Progression needs IOI's servers. If you get disconnected mid-mission, use Retry. Offline saves are separate from online ones.",
+        "Known, unsolved in DroidDeck (#1293): in the Guided Training tutorial, the 'Hold A to disguise yourself' step can ignore input forever. If it happens, skip the tutorial or restart the mission."
       ],
       "launchOptions": "%command% -skip_launcher",
       "env": {
         "VKD3D_CONFIG": "nodxr",
+        "VKD3D_FEATURE_LEVEL": "12_1",
         "VKD3D_FRAME_RATE": "30"
       },
       "profile": {
         "name": "Best compatibility + performance",
-        "description": "FEX Performance + TSO, ray tracing hidden, 30 fps cap, launcher skipped, 75% render scale.",
+        "description": "FEX Performance + TSO, ray tracing hidden at feature level 12_1, 30 fps cap, launcher skipped, 75% render scale.",
         "fex": {
           "FEX_TSOENABLED": "1",
           "FEX_VECTORTSOENABLED": "0",
@@ -216,6 +219,137 @@
       },
       "detectFiles": [
         "Retail/HITMAN3.exe"
+      ]
+    },
+    {
+      "id": "dr2",
+      "name": "Dead Rising 2",
+      "steamAppId": 45740,
+      "installDir": "Dead Rising 2",
+      "detectFiles": [
+        "deadrising2.exe"
+      ],
+      "summary": "Forge engine, 32-bit Direct3D 9 (DXVK), no DRM beyond Steam. Runs well on the Thor's GPU; the problems are audio crackling, controller detection and framerate-tied gameplay.",
+      "notes": [
+        "FEX uses DroidDeck's Performance + TSO preset. The game is light, but its multithreaded engine needs main TSO to avoid stalls under translation.",
+        "Audio: crackling is the most common Dead Rising complaint under Proton, and the Thor's Android audio output doesn't run in low-latency mode. This profile gives DroidDeck's DirectAudio a bigger buffer for this game only (AUDIO_DIRECT_MS=100, AUDIO_DIRECT_PERIOD_MS=25, up from 60 and 20). That adds about 40 ms of audio delay in exchange for no underruns. If it still crackles, DroidDeck's documented fallback is the PulseAudio path: in DroidDeck's Game environment for this game, add WINE_AUDIO_DRIVER=pulse and PULSE_LATENCY_MSEC=60.",
+        "The frame rate is capped at 60 through DXVK (d3d9.maxFrameRate = 60). The engine allows up to 120 FPS, but some gameplay, like pushable items and weapon ammo drain, runs too fast above 60, and the cap leaves CPU time for the audio thread.",
+        "Controller: the game only detects an official Xbox 360 pad, which is why DroidDeck reports it 'runs well but ignores the controller' (#386). The Controller fix button installs ClownDR2Fix v1.5.0.1, which switches the game to SDL's gamepad support. After applying, open Options > PC Settings in the game once and enable the controller if it's off.",
+        "An older DXVK isn't pinned. No source ties it to this crackling, and ClownDR2Fix's author warns that older Proton/DXVK versions corrupt its graphics fixes. If the audio fix isn't enough, DroidDeck's Components page can try DXVK 2.7.1 for this game alone."
+      ],
+      "env": {
+        "AUDIO_DIRECT_MS": "100",
+        "AUDIO_DIRECT_PERIOD_MS": "25",
+        "DXVK_CONFIG": "d3d9.maxFrameRate = 60"
+      },
+      "profile": {
+        "name": "Best compatibility + performance",
+        "description": "FEX Performance + TSO, a larger DirectAudio buffer against crackling, and a 60 fps cap through DXVK.",
+        "fex": {
+          "FEX_TSOENABLED": "1",
+          "FEX_VECTORTSOENABLED": "0",
+          "FEX_MEMCPYSETTSOENABLED": "0",
+          "FEX_HALFBARRIERTSOENABLED": "0",
+          "FEX_X87REDUCEDPRECISION": "1",
+          "FEX_MULTIBLOCK": "1"
+        }
+      },
+      "tweaks": [],
+      "ui": {
+        "name": "UI scale (in-game only)",
+        "description": "Dead Rising 2 has no UI scale setting.",
+        "manual": "Dead Rising 2 has no UI or text scale setting, in its menus or its rendersettings.ini, and its HUD is laid out for 16:9 at any resolution. ClownDR2Fix only enlarges fonts above 1200p, which doesn't help at the Thor's 1080p. What helps:\n\n• Options > Display: turn subtitles on.\n• The Best settings button already caps the game at 60 fps, which keeps the HUD from stuttering."
+      },
+      "extras": [
+        {
+          "kind": "controller",
+          "short": "controller fix",
+          "name": "Controller fix (ClownDR2Fix)",
+          "description": "Downloads ClownDR2Fix v1.5.0.1 from its author's GitHub release (github.com/Clownacy/ClownDR2Fix), checks its SHA-256, and copies its 4 files into the game folder: dinput8.dll (ASI loader), DR2Fix.asi and two shader archives. It makes any controller work through SDL and fixes framerate-tied gameplay, the PC port's washed-out gamma and exposure, and the logo screens. No game file is replaced, and revert deletes exactly what was added. It also tells Wine to load the mod's dinput8.dll (WINEDLLOVERRIDES=dinput8=n,b) for this game only.",
+          "env": {
+            "WINEDLLOVERRIDES": "dinput8=n,b"
+          },
+          "tweaks": [
+            {
+              "id": "clowndr2fix",
+              "name": "ClownDR2Fix v1.5.0.1 (downloaded from GitHub, SHA-256 checked)",
+              "type": "modZip",
+              "url": "https://github.com/Clownacy/ClownDR2Fix/releases/download/v1.5.0.1/clowndr2fix-v1-5-0-1.zip",
+              "sha256": "5c3ffbde77b0d78845df3c3b0d622005e0bb68e08b4dce259e990600a6e25616"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dr2otr",
+      "name": "Dead Rising 2: Off the Record",
+      "steamAppId": 45770,
+      "installDir": "Dead Rising 2 Off The Record",
+      "detectFiles": [
+        "deadrising2otr.exe"
+      ],
+      "summary": "Forge engine, 32-bit Direct3D 9 (DXVK). Same audio, controller and framerate problems as Dead Rising 2, plus an endless loading screen at Case 7-4.",
+      "notes": [
+        "FEX uses DroidDeck's Performance + TSO preset. The game is light, but its multithreaded engine needs main TSO to avoid stalls under translation.",
+        "Audio: crackling is the most common Dead Rising complaint under Proton, and the Thor's Android audio output doesn't run in low-latency mode. This profile gives DroidDeck's DirectAudio a bigger buffer for this game only (AUDIO_DIRECT_MS=100, AUDIO_DIRECT_PERIOD_MS=25, up from 60 and 20). That adds about 40 ms of audio delay in exchange for no underruns. If it still crackles, DroidDeck's documented fallback is the PulseAudio path: in DroidDeck's Game environment for this game, add WINE_AUDIO_DRIVER=pulse and PULSE_LATENCY_MSEC=60.",
+        "The frame rate is capped at 60 through DXVK (d3d9.maxFrameRate = 60). The engine allows up to 120 FPS, but some gameplay, like pushable items and weapon ammo drain, runs too fast above 60, and the cap leaves CPU time for the audio thread.",
+        "Case 7-4 can hang on an endless loading screen under Proton (ProtonDB, PCGamingWiki). This profile sets UseMultiCore = false in the game's rendersettings.ini, the community fix. The game writes that file on first launch, so launch once, quit at the menu, then apply.",
+        "On the very first launch the game can loop on 'loading DLC' after pressing Start. Quit through DroidDeck and launch again.",
+        "Controller: the game only detects an official Xbox 360 pad, which is why DroidDeck reports it 'runs well but ignores the controller' (#386). The Controller fix button installs ClownDR2Fix v1.5.0.1, which switches the game to SDL's gamepad support. After applying, open Options > PC Settings in the game once and enable the controller if it's off.",
+        "An older DXVK isn't pinned. No source ties it to this crackling, and ClownDR2Fix's author warns that older Proton/DXVK versions corrupt its graphics fixes. If the audio fix isn't enough, DroidDeck's Components page can try DXVK 2.7.1 for this game alone."
+      ],
+      "env": {
+        "AUDIO_DIRECT_MS": "100",
+        "AUDIO_DIRECT_PERIOD_MS": "25",
+        "DXVK_CONFIG": "d3d9.maxFrameRate = 60"
+      },
+      "profile": {
+        "name": "Best compatibility + performance",
+        "description": "FEX Performance + TSO, a larger DirectAudio buffer against crackling, a 60 fps cap, and the Case 7-4 loading-screen fix.",
+        "fex": {
+          "FEX_TSOENABLED": "1",
+          "FEX_VECTORTSOENABLED": "0",
+          "FEX_MEMCPYSETTSOENABLED": "0",
+          "FEX_HALFBARRIERTSOENABLED": "0",
+          "FEX_X87REDUCEDPRECISION": "1",
+          "FEX_MULTIBLOCK": "1"
+        }
+      },
+      "tweaks": [
+        {
+          "id": "otr_multicore",
+          "name": "Case 7-4 loading fix (rendersettings.ini UseMultiCore = false)",
+          "type": "iniKey",
+          "path": "pfx:drive_c/users/steamuser/Documents/My Games/Dead Rising 2 Off The Record/rendersettings.ini",
+          "key": "UseMultiCore",
+          "value": "false"
+        }
+      ],
+      "ui": {
+        "name": "UI scale (in-game only)",
+        "description": "Dead Rising 2 has no UI scale setting.",
+        "manual": "Off the Record has no UI or text scale setting, in its menus or its rendersettings.ini, and its HUD is laid out for 16:9 at any resolution. ClownDR2Fix only enlarges fonts above 1200p, which doesn't help at the Thor's 1080p. What helps:\n\n• Options > Display: turn subtitles on.\n• The Best settings button already caps the game at 60 fps, which keeps the HUD from stuttering."
+      },
+      "extras": [
+        {
+          "kind": "controller",
+          "short": "controller fix",
+          "name": "Controller fix (ClownDR2Fix)",
+          "description": "Downloads ClownDR2Fix v1.5.0.1 from its author's GitHub release (github.com/Clownacy/ClownDR2Fix), checks its SHA-256, and copies its 4 files into the game folder: dinput8.dll (ASI loader), DR2Fix.asi and two shader archives. It makes any controller work through SDL and fixes framerate-tied gameplay, the PC port's washed-out gamma and exposure, and the logo screens. No game file is replaced, and revert deletes exactly what was added. It also tells Wine to load the mod's dinput8.dll (WINEDLLOVERRIDES=dinput8=n,b) for this game only.",
+          "env": {
+            "WINEDLLOVERRIDES": "dinput8=n,b"
+          },
+          "tweaks": [
+            {
+              "id": "clowndr2fix",
+              "name": "ClownDR2Fix v1.5.0.1 (downloaded from GitHub, SHA-256 checked)",
+              "type": "modZip",
+              "url": "https://github.com/Clownacy/ClownDR2Fix/releases/download/v1.5.0.1/clowndr2fix-v1-5-0-1.zip",
+              "sha256": "5c3ffbde77b0d78845df3c3b0d622005e0bb68e08b4dce259e990600a6e25616"
+            }
+          ]
+        }
       ]
     }
   ]

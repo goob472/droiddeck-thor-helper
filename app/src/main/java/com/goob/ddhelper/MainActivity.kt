@@ -39,8 +39,8 @@ class MainActivity : AppCompatActivity() {
         val art: ImageView,
         val letter: TextView,
         val status: TextView,
-        val settingsBtn: MaterialButton,
-        val uiBtn: MaterialButton,
+        /** One button per pack (settings, UI mod, extras), keyed by pack kind. */
+        val buttons: LinkedHashMap<String, MaterialButton>,
     )
 
     private val dp get() = resources.displayMetrics.density
@@ -87,15 +87,28 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             addView(header); addView(accessText)
         }
-        val grantBtn = outlined("Grant access").apply { setOnClickListener { requestAccess() } }
-        val openBtn = outlined("Open DroidDeck").apply { setOnClickListener { openDroidDeck() } }
+        val grantBtn = outlined("Grant access").apply { withIcon(R.drawable.ic_lock_open); setOnClickListener { requestAccess() } }
+        val openBtn = outlined("Open DroidDeck").apply { withIcon(R.drawable.ic_launch); setOnClickListener { openDroidDeck() } }
+        val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+        // Landscape (the Thor's main screen): title left, buttons right. Narrow/portrait: buttons go
+        // under the title as a row of two, so the title never gets squeezed.
+        val narrow = resources.configuration.screenWidthDp < 600
         val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = if (narrow) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            gravity = if (narrow) Gravity.START else Gravity.CENTER_VERTICAL
             setPadding(px(8), px(4), px(4), px(4))
-            addView(titleBlock, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(grantBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = px(8) })
-            addView(openBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = px(8) })
+            if (narrow) {
+                addView(titleBlock)
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    addView(grantBtn, LinearLayout.LayoutParams(0, wrap, 1f))
+                    addView(openBtn, LinearLayout.LayoutParams(0, wrap, 1f).apply { marginStart = px(8) })
+                })
+            } else {
+                addView(titleBlock, LinearLayout.LayoutParams(0, wrap, 1f))
+                addView(grantBtn, LinearLayout.LayoutParams(wrap, wrap).apply { marginStart = px(8) })
+                addView(openBtn, LinearLayout.LayoutParams(wrap, wrap).apply { marginStart = px(8) })
+            }
         }
 
         logText = body("", 11.5f).apply { typeface = Typeface.MONOSPACE; setTextIsSelectable(true) }
@@ -150,14 +163,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Right: the two actions.
-        val settingsBtn = MaterialButton(this).apply { setOnClickListener { onSettings(g) } }
-        val uiBtn = outlined("").apply { setOnClickListener { onUi(g) } }
+        val buttons = LinkedHashMap<String, MaterialButton>()
+        g.packs.forEachIndexed { i, pack ->
+            buttons[pack.kind] = (if (i == 0) MaterialButton(this) else outlined("")).apply { setOnClickListener { onPack(g, pack) } }
+        }
         // ~176dp on the Thor's landscape screen, narrower in portrait so the title keeps room.
         val btnW = px((resources.configuration.screenWidthDp * 0.36f).toInt().coerceIn(128, 190))
         val right = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(settingsBtn, LinearLayout.LayoutParams(btnW, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(uiBtn, LinearLayout.LayoutParams(btnW, ViewGroup.LayoutParams.WRAP_CONTENT))
+            buttons.values.forEach { addView(it, LinearLayout.LayoutParams(btnW, ViewGroup.LayoutParams.WRAP_CONTENT)) }
         }
 
         val rowLayout = LinearLayout(this).apply {
@@ -167,7 +181,7 @@ class MainActivity : AppCompatActivity() {
             addView(middle, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(right)
         }
-        rows += Row(g, art, letter, status, settingsBtn, uiBtn)
+        rows += Row(g, art, letter, status, buttons)
         return card(rowLayout, padV = 10)
     }
 
@@ -193,25 +207,30 @@ class MainActivity : AppCompatActivity() {
     private fun refreshButtons() {
         val records = File(filesDir, "applied")
         for (r in rows) {
-            val settingsOn = File(records, "${r.game.id}.json").isFile
-            val ui = r.game.ui
-            val uiOn = File(records, "${r.game.id}.${Pack.UI}.json").isFile
             val scanned = installs.containsKey(r.game.id)
             val install = installs[r.game.id]
             val installed = install != null
-
-            r.settingsBtn.text = if (settingsOn) "Revert settings" else "Apply best settings"
-            r.uiBtn.visibility = if (ui == null) View.GONE else View.VISIBLE
-            r.uiBtn.text = when {
-                ui == null -> ""
-                ui.manual != null -> "UI scale: how-to"
-                uiOn -> "Revert UI mod"
-                else -> "Apply UI mod"
+            val states = ArrayList<String>()
+            for (pack in r.game.packs) {
+                val btn = r.buttons[pack.kind] ?: continue
+                val on = isApplied(r.game, pack)
+                btn.text = when {
+                    pack.manual != null -> "${pack.short.replaceFirstChar { it.uppercase() }}: how-to"
+                    pack.kind == Pack.SETTINGS -> if (on) "Revert settings" else "Apply best settings"
+                    on -> "Revert ${pack.short}"
+                    else -> "Apply ${pack.short}"
+                }
+                btn.withIcon(iconFor(pack, on))
+                // Applying needs the game's install folder in DroidDeck. Reverting stays possible after an
+                // uninstall so changes can always be undone, and a how-to only shows text.
+                btn.isEnabled = !working && (pack.manual != null || installed || (scanned && on))
+                val label = if (pack.kind == Pack.SETTINGS) "Settings" else pack.short.replaceFirstChar { it.uppercase() }
+                states += "$label: " + when {
+                    pack.manual != null -> "in-game"
+                    on -> "applied ✓"
+                    else -> if (pack.kind == Pack.SETTINGS) "not applied" else "off"
+                }
             }
-            // Applying needs the game's install folder in DroidDeck. Reverting stays possible after an
-            // uninstall so changes can always be undone, and the how-to only shows text.
-            r.settingsBtn.isEnabled = !working && (installed || (scanned && settingsOn))
-            r.uiBtn.isEnabled = !working && (ui?.manual != null || installed || (scanned && uiOn))
             r.status.text = buildString {
                 append(
                     when {
@@ -220,12 +239,33 @@ class MainActivity : AppCompatActivity() {
                         else -> "Not installed in DroidDeck"
                     }
                 )
-                append("\nSettings: ").append(if (settingsOn) "applied ✓" else "not applied")
-                if (ui != null) append(" · UI: ").append(if (ui.manual != null) "in-game" else if (uiOn) "applied ✓" else "off")
+                append("\n").append(states.joinToString(" · "))
             }
             r.status.alpha = if (scanned && !installed) 0.55f else 0.8f
         }
     }
+
+    /** Glyph for a pack button: what it will do next (apply something, revert, or show a how-to). */
+    private fun iconFor(p: Pack, applied: Boolean): Int = when {
+        p.manual != null -> R.drawable.ic_info
+        applied -> R.drawable.ic_undo
+        p.kind == Pack.SETTINGS -> R.drawable.ic_tune
+        p.kind == Pack.UI -> R.drawable.ic_format_size
+        p.kind == "controller" -> R.drawable.ic_gamepad
+        else -> R.drawable.ic_tune
+    }
+
+    /** Leading icon, tinted like the button's text (so it greys out with it). */
+    private fun MaterialButton.withIcon(res: Int) {
+        setIconResource(res)
+        iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+        iconSize = px(18)
+        iconPadding = px(6)
+        iconTint = textColors
+    }
+
+    private fun isApplied(g: Game, p: Pack) =
+        File(filesDir, "applied/" + if (p.kind == Pack.SETTINGS) "${g.id}.json" else "${g.id}.${p.kind}.json").isFile
 
     private fun busy(b: Boolean) = main.post { working = b; refreshButtons() }
 
@@ -330,32 +370,24 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- actions ----------
 
-    private fun onSettings(g: Game) {
-        val d = requireReady() ?: return
-        val on = File(filesDir, "applied/${g.id}.json").isFile
-        if (on) confirm("Revert ${g.name}?", "Puts back the settings this app changed for ${g.name} and closes DroidDeck.", "Revert") {
-            run(d) { it.revert(g, g.settings) }
-        } else confirm(
-            "Apply the best settings for ${g.name}?",
-            describe(g.settings) + "\n\nDroidDeck will be force-closed first, which ends any running Steam session. Your files are backed up, and tapping again reverts everything.",
-            "Apply",
-        ) { run(d) { it.apply(g, g.settings) } }
-    }
-
-    private fun onUi(g: Game) {
-        val ui = g.ui ?: return
-        if (ui.manual != null) {
-            AlertDialog.Builder(this).setTitle("${g.name}: ${ui.name}").setMessage(ui.manual)
+    private fun onPack(g: Game, pack: Pack) {
+        if (pack.manual != null) {
+            AlertDialog.Builder(this).setTitle("${g.name}: ${pack.name}").setMessage(pack.manual)
                 .setPositiveButton("OK", null).show()
             return
         }
         val d = requireReady() ?: return
-        val on = File(filesDir, "applied/${g.id}.${Pack.UI}.json").isFile
-        if (on) confirm("Revert the UI mod for ${g.name}?", "Puts the game's UI back to normal size and closes DroidDeck.", "Revert") {
-            run(d) { it.revert(g, ui) }
-        } else confirm("${ui.name} for ${g.name}?", ui.description + "\n\nDroidDeck will be force-closed first.", "Apply") {
-            run(d) { it.apply(g, ui) }
-        }
+        if (isApplied(g, pack)) confirm(
+            "Revert ${pack.short} for ${g.name}?",
+            "Puts back exactly what this app changed for ${pack.name} and closes DroidDeck.",
+            "Revert",
+        ) { run(d) { it.revert(g, pack) } }
+        else confirm(
+            if (pack.kind == Pack.SETTINGS) "Apply the best settings for ${g.name}?" else "${pack.name} for ${g.name}?",
+            describe(pack) + "\n\nDroidDeck will be force-closed first, which ends any running Steam session. " +
+                "Your files are backed up, and tapping again reverts everything.",
+            "Apply",
+        ) { run(d) { it.apply(g, pack) } }
     }
 
     private fun describe(p: Pack) = buildString {
@@ -393,7 +425,7 @@ class MainActivity : AppCompatActivity() {
         val base = buildString {
             append("Steam app ${g.steamAppId}\n${g.summary}\n\n")
             append("BEST SETTINGS\n").append(describe(g.settings))
-            g.ui?.let { append("\n\nUI MOD: ${it.name}\n").append(it.manual ?: describe(it)) }
+            (listOfNotNull(g.ui) + g.extras).forEach { append("\n\n${it.name.uppercase()}\n").append(it.manual ?: describe(it)) }
             append("\n\nNOTES\n").append(g.notes.joinToString("\n\n") { "• $it" })
         }
         text.text = base + "\n\nCURRENT STATE\nReading…"

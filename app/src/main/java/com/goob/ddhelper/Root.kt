@@ -146,6 +146,16 @@ object Root {
         return prepare + "\n" + decode + place + "\n"
     }
 
+    /** Binary version of [writeText] (mod files). Large files get a longer timeout. */
+    fun writeBytes(path: String, bytes: ByteArray): Result =
+        runScoped(listOf(path, "$path.ddh-tmp"), writeScript(path, bytes), 120L + bytes.size / 100_000)
+
+    /** Deletes one file. Never recursive. */
+    fun deleteFile(path: String) = runScoped(listOf(path), "[ -f ${q(path)} ] && rm -f ${q(path)}")
+
+    /** Removes a folder only if it is empty (used to tidy folders a mod created). */
+    fun removeEmptyDir(path: String) = runScoped(listOf(path), "rmdir ${q(path)} 2>/dev/null")
+
     fun rename(from: String, to: String) = runScoped(listOf(from, to), "mv -f ${q(from)} ${q(to)}")
 
     /** Lists matching files under an allowed folder (used to find cached cover art). */
