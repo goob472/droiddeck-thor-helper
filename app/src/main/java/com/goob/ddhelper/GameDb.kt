@@ -23,7 +23,7 @@ data class Game(
     val notes: List<String>,
     val launchOptions: String?,
     val env: Map<String, String?>,
-    val variants: List<Variant>,
+    val profile: Variant,
     val tweaks: List<Tweak>,
 )
 
@@ -47,7 +47,7 @@ object GameDb {
         val games = root.getJSONArray("games")
         return (0 until games.length()).map { i ->
             val g = games.getJSONObject(i)
-            val variants = g.getJSONArray("variants")
+            val profile = g.getJSONObject("profile")
             val tweaks = g.optJSONArray("tweaks") ?: JSONArray()
             Game(
                 id = g.getString("id"),
@@ -58,10 +58,7 @@ object GameDb {
                 notes = strList(g.optJSONArray("notes")),
                 launchOptions = g.optString("launchOptions").ifEmpty { null },
                 env = strMap(g.optJSONObject("env")),
-                variants = (0 until variants.length()).map { j ->
-                    val v = variants.getJSONObject(j)
-                    Variant(v.getString("id"), v.getString("name"), v.optString("description"), strMap(v.optJSONObject("fex")))
-                },
+                profile = Variant("best", profile.getString("name"), profile.optString("description"), strMap(profile.optJSONObject("fex"))),
                 tweaks = (0 until tweaks.length()).map { j ->
                     val t = tweaks.getJSONObject(j)
                     Tweak(t.getString("id"), t.getString("name"), t.optString("description"), t.getString("type"), t.optBoolean("default"), t)
@@ -70,11 +67,11 @@ object GameDb {
         }
     }
 
-    /** The full set of per-game environment entries for a variant. null = explicitly unset. */
-    fun environment(game: Game, variant: Variant): LinkedHashMap<String, String?> {
+    /** The full set of per-game environment entries for the game's profile. null = explicitly unset. */
+    fun environment(game: Game): LinkedHashMap<String, String?> {
         val out = LinkedHashMap<String, String?>()
         FEX_KEYS.forEach { out[it] = null }
-        out.putAll(variant.fex)
+        out.putAll(game.profile.fex)
         out.putAll(game.env)
         return out
     }

@@ -46,7 +46,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         log("Backups: ${dir.absolutePath}")
     }
 
-    fun apply(game: Game, variant: Variant, tweakIds: Set<String>, launchOptions: Boolean) {
+    fun apply(game: Game) {
         if (!Root.available()) fail("Root access was denied.")
         stopDroidDeck()
         backup(listOf(dd.envFile) + dd.localConfigs())
@@ -55,7 +55,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
             revertInternal(game)
         }
         val state = JSONObject()
-            .put("game", game.id).put("variant", variant.id).put("pkg", dd.pkg)
+            .put("game", game.id).put("profile", game.profile.name).put("pkg", dd.pkg)
             .put("appliedAt", System.currentTimeMillis())
         val scope = game.steamAppId.toString()
 
@@ -63,7 +63,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         val envText = Root.readText(ctx, dd.envFile)
         if (envText == null) log("No game-environment.json yet; creating one.")
         val env = EnvFile.parseOrNew(envText)
-        val entries = GameDb.environment(game, variant)
+        val entries = GameDb.environment(game)
         val prev = EnvFile.apply(env, scope, entries)
         write(dd.envFile, EnvFile.encode(env))
         state.put("env", JSONObject().apply { prev.forEach { (k, p) -> put(k, p.toJson()) } })
@@ -73,7 +73,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         stateFile(game).writeText(state.toString(2))
 
         // 2. Steam launch options.
-        if (launchOptions && game.launchOptions != null) {
+        if (game.launchOptions != null) {
             val configs = dd.localConfigs()
             if (configs.isEmpty()) log("No Steam localconfig.vdf found. Sign in to Steam in DroidDeck once, then apply again to set launch options.")
             val launch = JSONObject()
@@ -99,7 +99,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         if (install == null) log("${game.name} is not installed in any Steam library DroidDeck uses. Skipping game-file tweaks.")
         else log("Found ${game.name} at ${install.gameDir}")
         val tweaksState = JSONObject()
-        for (t in game.tweaks.filter { it.id in tweakIds }) {
+        for (t in game.tweaks) {
             if (install == null) break
             try {
                 when (t.type) {
@@ -248,10 +248,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         val install = dd.findInstall(game.steamAppId, game.installDir)
         sb.appendLine("Install: " + (install?.gameDir ?: "not found"))
         if (install != null) sb.appendLine("Proton prefix: " + (install.prefix ?: "not created yet (launch once)"))
-        appliedState(game)?.let { s ->
-            val v = game.variants.firstOrNull { it.id == s.optString("variant") }?.name ?: s.optString("variant")
-            sb.appendLine("Applied by this app: $v")
-        }
+        sb.appendLine("Helper profile: " + if (appliedState(game) != null) "APPLIED" else "not applied")
         return sb.toString().trimEnd()
     }
 

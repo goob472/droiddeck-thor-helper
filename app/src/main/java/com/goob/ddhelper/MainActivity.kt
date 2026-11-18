@@ -9,10 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
-import android.widget.CheckBox
 import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
@@ -32,14 +29,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gameSpinner: Spinner
     private lateinit var summaryText: TextView
     private lateinit var statusText: TextView
-    private lateinit var variantGroup: RadioGroup
-    private lateinit var tweakBox: LinearLayout
-    private lateinit var launchBox: CheckBox
+    private lateinit var profileText: TextView
     private lateinit var notesText: TextView
     private lateinit var logText: TextView
-    private lateinit var applyBtn: MaterialButton
-    private lateinit var revertBtn: MaterialButton
-    private val tweakChecks = LinkedHashMap<String, CheckBox>()
+    private lateinit var actionBtn: MaterialButton
+
+    /** null = unknown (no root yet), true = the helper's settings are applied for the selected game. */
+    private var applied: Boolean? = null
 
     private val dp get() = resources.displayMetrics.density
     private fun px(v: Int) = (v * dp).toInt()
@@ -93,14 +89,14 @@ class MainActivity : AppCompatActivity() {
             text = "Refresh status"; setOnClickListener { refreshStatus() }
         }
 
-        variantGroup = RadioGroup(this)
-        tweakBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        launchBox = CheckBox(this)
+        profileText = body().apply { setPadding(0, 0, 0, px(10)) }
         notesText = body()
 
-        applyBtn = MaterialButton(this).apply { text = "Apply selected profile"; setOnClickListener { confirmApply() } }
-        revertBtn = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = "Revert to my previous settings"; setOnClickListener { confirmRevert() }
+        actionBtn = MaterialButton(this).apply {
+            text = "Apply best settings"
+            textSize = 17f
+            minHeight = px(60)
+            setOnClickListener { if (applied == true) confirmRevert() else confirmApply() }
         }
         val openBtn = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
             text = "Open DroidDeck"; setOnClickListener { openDroidDeck() }
@@ -112,7 +108,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 20f; setTypeface(typeface, Typeface.BOLD); gravity = Gravity.START
             setPadding(px(6), px(8), px(6), px(4))
         }
-        val sub = body("Applies tuned DroidDeck settings for one game on the AYN Thor (Snapdragon 8 Gen 2 / Adreno 740).").apply {
+        val sub = body("One tap applies the best DroidDeck settings for the selected game on the AYN Thor (Snapdragon 8 Gen 2 / Adreno 740). Tap again to revert.").apply {
             setPadding(px(6), 0, px(6), px(6))
         }
 
@@ -122,10 +118,8 @@ class MainActivity : AppCompatActivity() {
             addView(header); addView(sub)
             addView(card("1 · Access", accessText, grantBtn))
             addView(card("2 · Game", gameSpinner, summaryText, statusText, refreshBtn))
-            addView(card("3 · Profile", variantGroup))
-            addView(card("4 · Extras", launchBox, tweakBox))
+            addView(card("3 · Apply", profileText, actionBtn, openBtn))
             addView(card("Notes", notesText))
-            addView(card("5 · Apply", applyBtn, revertBtn, openBtn))
             addView(card("Log", logText))
         }
         return ScrollView(this).apply {
@@ -139,25 +133,12 @@ class MainActivity : AppCompatActivity() {
     private fun selectGame(pos: Int) {
         val g = games[pos]
         summaryText.text = "Steam app ${g.steamAppId}. ${g.summary}"
-        variantGroup.removeAllViews()
-        g.variants.forEachIndexed { i, v ->
-            variantGroup.addView(RadioButton(this).apply {
-                id = View.generateViewId()
-                tag = v.id
-                text = "${v.name}\n${v.description}"
-                setPadding(px(4), px(6), 0, px(6))
-                isChecked = i == 0
-            })
+        profileText.text = buildString {
+            append(g.profile.name).append("\n").append(g.profile.description).append("\n\nAlso applies:")
+            g.env.forEach { (k, v) -> append("\n• $k=${v ?: "(unset)"}") }
+            g.launchOptions?.let { append("\n• Steam launch options: $it") }
+            g.tweaks.forEach { append("\n• ${it.name}") }
         }
-        tweakBox.removeAllViews(); tweakChecks.clear()
-        g.tweaks.forEach { t ->
-            val cb = CheckBox(this).apply { text = "${t.name}\n${t.description}"; isChecked = t.default; setPadding(px(4), px(6), 0, px(6)) }
-            tweakChecks[t.id] = cb; tweakBox.addView(cb)
-        }
-        launchBox.visibility = if (g.launchOptions != null) View.VISIBLE else View.GONE
-        launchBox.text = "Steam launch options\n${g.launchOptions}  (merged with any you already have)"
-        launchBox.isChecked = true
-        launchBox.setPadding(px(4), px(6), 0, px(6))
         notesText.text = g.notes.joinToString("\n\n") { "• $it" }
         refreshStatus()
     }
@@ -166,7 +147,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun log(msg: String) = main.post { logText.append(msg + "\n") }
 
-    private fun busy(b: Boolean) = main.post { applyBtn.isEnabled = !b; revertBtn.isEnabled = !b }
+    private fun busy(b: Boolean) = main.post { actionBtn.isEnabled = !b }
+
+    private fun updateButton() {
+        actionBtn.text = if (applied == true) "Revert to my previous settings" else "Apply best settings"
+    }
 
     private fun checkAccess() {
         accessText.text = "Requesting root… (approve the prompt from Magisk/KernelSU/APatch)"
@@ -191,19 +176,16 @@ class MainActivity : AppCompatActivity() {
     private fun refreshStatus() {
         val d = dd
         if (!rootOk || d == null) {
-            statusText.text = ""; return
+            statusText.text = ""; applied = null; updateButton(); return
         }
         val g = game
         statusText.text = "Reading current settings…"
         thread {
-            val s = runCatching { Applier(this, d, ::log).status(g) }.getOrElse { "Could not read status: ${it.message}" }
-            main.post { statusText.text = s }
+            val a = Applier(this, d, ::log)
+            val s = runCatching { a.status(g) }.getOrElse { "Could not read status: ${it.message}" }
+            val on = a.appliedState(g) != null
+            main.post { statusText.text = s; applied = on; updateButton() }
         }
-    }
-
-    private fun selectedVariant(): Variant {
-        val id = variantGroup.findViewById<RadioButton>(variantGroup.checkedRadioButtonId)?.tag as String?
-        return game.variants.firstOrNull { it.id == id } ?: game.variants.first()
     }
 
     private fun requireReady(): DroidDeck? {
@@ -218,53 +200,38 @@ class MainActivity : AppCompatActivity() {
 
     private fun confirmApply() {
         val d = requireReady() ?: return
-        val v = selectedVariant()
+        val g = game
         AlertDialog.Builder(this)
-            .setTitle("Apply \"${v.name}\" to ${game.name}?")
-            .setMessage("DroidDeck will be force-closed first, which ends any running Steam session. Your current files are backed up, and Revert restores them.")
-            .setPositiveButton("Apply") { _, _ -> runApply(d, v) }
+            .setTitle("Apply the best settings for ${g.name}?")
+            .setMessage("DroidDeck will be force-closed first, which ends any running Steam session. Your current files are backed up, and tapping the button again reverts everything.")
+            .setPositiveButton("Apply") { _, _ -> run(d) { it.apply(g) } }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun runApply(d: DroidDeck, v: Variant) {
+    private fun confirmRevert() {
+        val d = requireReady() ?: return
         val g = game
-        val tweaks = tweakChecks.filterValues { it.isChecked }.keys
-        val launch = launchBox.isChecked
+        AlertDialog.Builder(this)
+            .setTitle("Revert ${g.name}?")
+            .setMessage("Puts back the settings this app changed for ${g.name} and closes DroidDeck.")
+            .setPositiveButton("Revert") { _, _ -> run(d) { it.revert(g) } }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun run(d: DroidDeck, action: (Applier) -> Unit) {
         logText.text = ""
         busy(true)
         thread {
             try {
-                Applier(this, d, ::log).apply(g, v, tweaks, launch)
+                action(Applier(this, d, ::log))
             } catch (e: Exception) {
                 log("ERROR: ${e.message}")
             } finally {
                 busy(false); main.post { refreshStatus() }
             }
         }
-    }
-
-    private fun confirmRevert() {
-        val d = requireReady() ?: return
-        AlertDialog.Builder(this)
-            .setTitle("Revert ${game.name}?")
-            .setMessage("Puts back the settings this app changed for ${game.name} and closes DroidDeck.")
-            .setPositiveButton("Revert") { _, _ ->
-                val g = game
-                logText.text = ""
-                busy(true)
-                thread {
-                    try {
-                        Applier(this, d, ::log).revert(g)
-                    } catch (e: Exception) {
-                        log("ERROR: ${e.message}")
-                    } finally {
-                        busy(false); main.post { refreshStatus() }
-                    }
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun openDroidDeck() {

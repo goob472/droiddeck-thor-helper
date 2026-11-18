@@ -8,74 +8,32 @@
       "installDir": "Maneater",
       "summary": "Unreal Engine 4.25, Direct3D 11, Denuvo Anti-Tamper. Hangs on the spinning-shark loading screen under FEX with stock settings.",
       "notes": [
-        "Denuvo is the most likely cause of the endless spinning-shark screen: it uses self-modifying code, and FEX's faster presets skip the checks that catch it. Every profile here turns on full self-modifying-code checks (FEX_SMCCHECKS=full) and hides the hypervisor bit, as DroidDeck's own Denuvo preset does.",
-        "Denuvo counts CPU changes as hardware changes and can lock the game for 24 hours after about 5 of them. All three profiles report the same CPU to the game, so switching between them should not count. Changing Proton versions might.",
-        "Be online for the first launch after applying. Denuvo has to re-activate, and ProtonDB users report the game freezing at startup when offline.",
-        "The first launch can sit on the loading screen for several minutes while FEX translates code and DXVK builds shaders. Give it at least 5 to 10 minutes before you call it a hang.",
+        "Denuvo is the most likely cause of the endless spinning-shark screen: it uses self-modifying code, and FEX's faster presets skip the checks that catch it. This profile turns full code checks on and hides the hypervisor bit, as DroidDeck's own Denuvo preset does, but keeps main TSO on so UE4's loading threads don't deadlock.",
         "OPENSSL_ia32cap=:~0x20000000 hides the CPU's SHA extensions from the game's old bundled OpenSSL. That is the Steam community fix for Maneater freezing or crashing at startup on newer CPUs.",
-        "If every profile still hangs, turn on 'Disable async loading thread', apply again, and try once more. Then send DroidDeck's Share logs zip."
+        "The intro logo movies are renamed so the game doesn't have to play video through Media Foundation at boot, and Engine.ini turns off motion blur, depth of field, chromatic aberration and lens flares and lowers volumetric fog. Revert undoes all of it.",
+        "Be online for the first launch after applying. Denuvo has to re-activate, and ProtonDB users report the game freezing at startup when offline.",
+        "The first launch can sit on the loading screen for several minutes while FEX translates code and DXVK builds shaders. Give it 5 to 10 minutes before you call it a hang.",
+        "Denuvo can lock the game for 24 hours after about 5 hardware changes. Avoid switching Proton versions or FEX presets for this game repeatedly."
       ],
       "launchOptions": "%command% -USEALLAVAILABLECORES",
       "env": {
         "OPENSSL_ia32cap": ":~0x20000000",
         "DXVK_CONFIG": "dxgi.maxDeviceMemory = 4096"
       },
-      "variants": [
-        {
-          "id": "denuvo_tso",
-          "name": "Recommended: Denuvo + TSO",
-          "description": "DroidDeck's Denuvo preset with main memory-ordering (TSO) emulation turned on. UE4's many threads can deadlock without TSO, while full code checks keep Denuvo happy. The best mix of stability and speed.",
-          "fex": {
-            "FEX_TSOENABLED": "1",
-            "FEX_VECTORTSOENABLED": "0",
-            "FEX_MEMCPYSETTSOENABLED": "0",
-            "FEX_HALFBARRIERTSOENABLED": "1",
-            "FEX_X87REDUCEDPRECISION": "1",
-            "FEX_MULTIBLOCK": "1",
-            "FEX_SMCCHECKS": "full",
-            "FEX_HIDEHYPERVISORBIT": "1"
-          }
-        },
-        {
-          "id": "denuvo_stock",
-          "name": "Fast: DroidDeck Denuvo preset",
-          "description": "Exactly DroidDeck's built-in Denuvo preset: TSO off, full code checks, hypervisor bit hidden. Faster, but more likely to freeze in heavy multithreaded loading.",
-          "fex": {
-            "FEX_TSOENABLED": "0",
-            "FEX_VECTORTSOENABLED": "0",
-            "FEX_MEMCPYSETTSOENABLED": "0",
-            "FEX_HALFBARRIERTSOENABLED": "0",
-            "FEX_X87REDUCEDPRECISION": "1",
-            "FEX_MULTIBLOCK": "1",
-            "FEX_SMCCHECKS": "full",
-            "FEX_HIDEHYPERVISORBIT": "1"
-          }
-        },
-        {
-          "id": "denuvo_safe",
-          "name": "Safest: full TSO + Denuvo",
-          "description": "Every TSO option on, multiblock off and full x87 precision, plus the Denuvo checks. Slowest, but the most faithful x86 emulation. Use it if the other two still hang.",
-          "fex": {
-            "FEX_TSOENABLED": "1",
-            "FEX_VECTORTSOENABLED": "1",
-            "FEX_MEMCPYSETTSOENABLED": "1",
-            "FEX_HALFBARRIERTSOENABLED": "1",
-            "FEX_X87REDUCEDPRECISION": "0",
-            "FEX_MULTIBLOCK": "0",
-            "FEX_SMCCHECKS": "full",
-            "FEX_HIDEHYPERVISORBIT": "1"
-          }
-        }
-      ],
       "tweaks": [
         {
           "id": "skip_intro",
           "name": "Skip intro movies",
           "description": "Renames the logo MP4s in Maneater/Content/Movies, so the game does not have to play video through Media Foundation at boot. They are renamed, not deleted, and revert puts them back.",
           "type": "renameFiles",
-          "default": true,
           "dir": "Maneater/Content/Movies",
-          "prefixes": ["DeepSilver_", "MIG_Logo_", "MW_Logos_", "TWI_Logo_", "UE4_Logo_"],
+          "prefixes": [
+            "DeepSilver_",
+            "MIG_Logo_",
+            "MW_Logos_",
+            "TWI_Logo_",
+            "UE4_Logo_"
+          ],
           "suffix": ".mp4"
         },
         {
@@ -83,7 +41,6 @@
           "name": "Handheld performance tweaks (Engine.ini)",
           "description": "Turns off motion blur, depth of field, chromatic aberration and lens flares, and lowers volumetric fog. That is cheaper on the Adreno 740 and makes fewer shaders to build on first load.",
           "type": "iniMerge",
-          "default": true,
           "path": "pfx:drive_c/users/steamuser/AppData/Local/Maneater/Saved/Config/WindowsNoEditor/Engine.ini",
           "sections": {
             "SystemSettings": {
@@ -95,21 +52,22 @@
               "r.VolumetricFog.GridSizeZ": "64"
             }
           }
-        },
-        {
-          "id": "no_async_loading",
-          "name": "Disable async loading thread (loading-hang fallback)",
-          "description": "Makes UE4 load packages on the game thread. Loading is slower, but it removes a cross-thread handoff that can deadlock under x86 emulation. Leave it off unless the profiles above still hang.",
-          "type": "iniMerge",
-          "default": false,
-          "path": "pfx:drive_c/users/steamuser/AppData/Local/Maneater/Saved/Config/WindowsNoEditor/Engine.ini",
-          "sections": {
-            "/Script/Engine.StreamingSettings": {
-              "s.AsyncLoadingThreadEnabled": "False"
-            }
-          }
         }
-      ]
+      ],
+      "profile": {
+        "name": "Best compatibility + performance",
+        "description": "Full self-modifying-code checks and a hidden hypervisor bit for Denuvo, with main TSO on so UE4's threads don't deadlock. Vector and memcpy TSO stay off and multiblock stays on for speed.",
+        "fex": {
+          "FEX_TSOENABLED": "1",
+          "FEX_VECTORTSOENABLED": "0",
+          "FEX_MEMCPYSETTSOENABLED": "0",
+          "FEX_HALFBARRIERTSOENABLED": "1",
+          "FEX_X87REDUCEDPRECISION": "1",
+          "FEX_MULTIBLOCK": "1",
+          "FEX_SMCCHECKS": "full",
+          "FEX_HIDEHYPERVISORBIT": "1"
+        }
+      }
     }
   ]
 }

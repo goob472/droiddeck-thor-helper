@@ -30,10 +30,14 @@ Unreal Engine 4.25, Direct3D 11, **Denuvo**. It hangs on the spinning-shark load
   Denuvo relies on self-modifying code, and FEX's faster presets skip the checks that catch it.
 * `OPENSSL_ia32cap=:~0x20000000` stops the game's old bundled OpenSSL from using the CPU's SHA
   extensions. That is the Steam community fix for Maneater freezing or crashing at startup.
-* Profiles: **Recommended** (Denuvo + main TSO), **Fast** (DroidDeck's exact Denuvo preset), and **Safest** (full TSO).
-* Extras: skip the intro MP4s (renamed, not deleted), handheld `Engine.ini` tweaks, and an optional
-  "disable async loading thread" fallback.
-* `-USEALLAVAILABLECORES` is added to the Steam launch options.
+* FEX: main TSO on (UE4's loading threads can deadlock without it), with vector and memcpy TSO off and
+  multiblock on for speed. This combines DroidDeck's Denuvo preset with its Performance + TSO preset.
+* Also skips the intro MP4s (renamed, not deleted), applies handheld `Engine.ini` tweaks (no motion blur,
+  depth of field, chromatic aberration or lens flares, and lighter volumetric fog), and adds
+  `-USEALLAVAILABLECORES` to the Steam launch options.
+
+The app has one button per game: **Apply best settings**. Once applied, the same button reads
+**Revert to my previous settings**.
 
 ## Install and update with Obtainium
 

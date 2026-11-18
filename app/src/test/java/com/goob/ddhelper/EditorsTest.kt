@@ -72,7 +72,7 @@ class EditorsTest {
         val original = "{\"version\":1,\"shared\":{\"A\":\"1\"},\"games\":{\"629820\":{\"FEX_MULTIBLOCK\":\"0\",\"KEEP\":\"x\",\"FEX_SMCCHECKS\":null}}}"
         val root = EnvFile.parseOrNew(original)
         val game = GameDb.parse(File("src/main/assets/games.json").readText()).first()
-        val entries = GameDb.environment(game, game.variants.first())
+        val entries = GameDb.environment(game)
         val prev = EnvFile.apply(root, "629820", entries)
         val g = root.getJSONObject("games").getJSONObject("629820")
         assertEquals("full", g.getString("FEX_SMCCHECKS"))
@@ -103,12 +103,11 @@ class EditorsTest {
         val games = GameDb.parse(File("src/main/assets/games.json").readText())
         val m = games.first { it.id == "maneater" }
         assertEquals(629820L, m.steamAppId)
-        assertEquals(3, m.variants.size)
-        m.variants.forEach { v ->
-            val env = GameDb.environment(m, v)
-            assertEquals("full", env["FEX_SMCCHECKS"]); assertEquals("1", env["FEX_HIDEHYPERVISORBIT"])
-            GameDb.FEX_KEYS.forEach { assertTrue(env.containsKey(it)) }
-        }
+        val env = GameDb.environment(m)
+        assertEquals("full", env["FEX_SMCCHECKS"]); assertEquals("1", env["FEX_HIDEHYPERVISORBIT"])
+        assertEquals("1", env["FEX_TSOENABLED"]); assertEquals("1", env["FEX_MULTIBLOCK"])
+        GameDb.FEX_KEYS.forEach { assertTrue(env.containsKey(it)) }
+        assertEquals(listOf("skip_intro", "engine_perf"), m.tweaks.map { it.id })
         assertNotNull(m.tweaks.firstOrNull { it.id == "skip_intro" })
     }
 }
