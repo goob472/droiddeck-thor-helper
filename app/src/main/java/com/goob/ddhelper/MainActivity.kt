@@ -1,6 +1,5 @@
 package com.goob.ddhelper
 
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Typeface
@@ -52,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         games = GameDb.parse(assets.open("games.json").bufferedReader().readText())
         setContentView(buildUi())
         refreshButtons()
+        loadArt()
         checkAccess()
     }
 
@@ -224,20 +224,33 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-            dd?.let { loadArt(it) }
+            dd?.let { loadArtFromDroidDeck(it) }
         }
     }
 
-    /** Pulls each game's library art out of DroidDeck's Steam cache (cached in this app afterwards). */
-    private fun loadArt(d: DroidDeck) {
-        for (r in rows) {
-            val cached = File(filesDir, "art/${r.game.steamAppId}.jpg")
-            if (!cached.isFile) {
-                val src = d.findArt(r.game.steamAppId) ?: continue
-                if (!Root.copyOut(src, cached)) continue
+    private val artShown = HashSet<Long>()
+
+    private fun showArt(r: Row, bmp: android.graphics.Bitmap) = main.post {
+        artShown += r.game.steamAppId
+        r.art.setImageBitmap(bmp); r.art.visibility = View.VISIBLE
+    }
+
+    /** Cover art: cached copy first, then Steam's public CDN. Needs no root, so it runs at startup. */
+    private fun loadArt() {
+        for (r in rows) CoverArt.cached(this, r.game.steamAppId)?.let { showArt(r, it) }
+        thread {
+            for (r in rows) {
+                if (CoverArt.cached(this, r.game.steamAppId) != null) continue
+                CoverArt.download(this, r.game.steamAppId)?.let { showArt(r, it) }
             }
-            val bmp = runCatching { BitmapFactory.decodeFile(cached.absolutePath) }.getOrNull() ?: continue
-            main.post { r.art.setImageBitmap(bmp); r.art.visibility = View.VISIBLE }
+        }
+    }
+
+    /** Offline fallback: art from DroidDeck's own Steam cache, for anything the CDN didn't supply. */
+    private fun loadArtFromDroidDeck(d: DroidDeck) {
+        for (r in rows) {
+            if (r.game.steamAppId in artShown || CoverArt.cached(this, r.game.steamAppId) != null) continue
+            CoverArt.fromDroidDeck(this, d, r.game.steamAppId)?.let { showArt(r, it) }
         }
     }
 

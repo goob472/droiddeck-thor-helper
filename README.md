@@ -19,7 +19,8 @@ exactly what you had. DroidDeck picks the changes up the next time you launch th
 
 ## The game list
 
-Each game is a card: cover art (taken from Steam's own library cache inside DroidDeck) and title on
+Each game is a card: cover art (Steam's 600x900 library capsule from its public CDN, cached on the
+device, with DroidDeck's local Steam cache as the offline fallback) and title on
 the left, two buttons on the right:
 
 * **Apply best settings / Revert settings**: the compatibility and performance profile below.
