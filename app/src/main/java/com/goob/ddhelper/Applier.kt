@@ -50,7 +50,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         if (pack.manual != null) fail("${pack.name} has to be changed inside the game.")
         if (!Storage.isGranted(dd.envFile)) fail("Access to DroidDeck's folder hasn't been granted yet.")
         if (dd.findInstall(game) == null) fail("${game.name} isn't installed in DroidDeck, so nothing was changed.")
-        backup(listOf(dd.envFile) + dd.localConfigs())
+        backup(listOf(dd.envFile, dd.protonGames) + dd.localConfigs())
         if (appliedState(game, pack.kind) != null) {
             log("${pack.name} is already applied. Reverting it first so it starts from your own settings.")
             revertInternal(game, pack.kind)
@@ -104,6 +104,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
             else log("Found ${game.name} at ${install.gameDir}")
         }
         val tweaksState = JSONObject()
+        val missed = ArrayList<String>()
         for (t in pack.tweaks) {
             if (install == null) break
             try {
@@ -112,11 +113,20 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                     "iniMerge" -> iniMerge(install, t)?.let { tweaksState.put(t.id, it) }
                     "wineReg" -> wineReg(install, t)?.let { tweaksState.put(t.id, it) }
                     "iniKey" -> iniKey(install, t)?.let { tweaksState.put(t.id, it) }
+                    "forceProton", "steamInput", "controllerLayout" -> {
+                        val done = when (t.type) {
+                            "forceProton" -> forceProton(scope)
+                            "steamInput" -> steamInput(scope, t.json.getString("value"))
+                            else -> controllerLayout(scope, t)
+                        }
+                        if (done == null) missed += t.name else tweaksState.put(t.id, done)
+                    }
                     "modZip" -> modZip(game, install, t)?.let { tweaksState.put(t.id, it) }
                     else -> log("Unknown tweak type ${t.type}")
                 }
             } catch (e: Exception) {
                 log("Tweak '${t.name}' failed: ${e.message}")
+                missed += t.name
             }
             state.put("tweaks", tweaksState)
             stateFile(game, pack.kind).writeText(state.toString(2))
@@ -124,7 +134,59 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         state.put("tweaks", tweaksState)
         if (install != null) state.put("install", install.gameDir).put("prefix", install.prefix ?: JSONObject.NULL)
         stateFile(game, pack.kind).writeText(state.toString(2))
+        if (missed.isNotEmpty()) log("NOT APPLIED: ${missed.joinToString("; ")}. See the lines above, then revert and apply again.")
         log("Done: ${pack.name} applied. Open DroidDeck and launch ${game.name}. The changes apply from the next game launch.")
+    }
+
+    /** Pins the game to DroidDeck's current default Proton, so its Windows build is used, not a Linux one. */
+    private fun forceProton(scope: String): JSONObject? {
+        val choice = SteamSettings.defaultProton(Storage.readText(dd.protonState))
+        val root = SteamSettings.parseGames(Storage.readText(dd.protonGames))
+        if (choice == null || root == null) {
+            log("  Could not read DroidDeck's Proton list. Start Steam in DroidDeck once, quit, then apply again.")
+            return null
+        }
+        val games = root.getJSONObject("games")
+        val record = JSONObject().put("protonGames", true).put("had", games.has(scope))
+            .put("old", games.opt(scope) ?: JSONObject.NULL)
+        games.put(scope, choice)
+        write(dd.protonGames, root.toString(1) + "\n")
+        log("  Proton for this game: ${choice.getString("dir")}")
+        return record
+    }
+
+    private fun steamInput(scope: String, value: String): JSONObject? {
+        val files = JSONObject()
+        for (cfg in dd.localConfigs()) {
+            val edit = Storage.readText(cfg)?.let { SteamSettings.setSteamInput(it, scope, value) } ?: continue
+            write(cfg, edit.text)
+            files.put(cfg, edit.prev)
+            log("  Steam Input: " + if (value == "2") "forced on" else value)
+        }
+        if (files.length() > 0) return JSONObject().put("steamInput", files)
+        log("  No Steam account config found. Sign in to Steam in DroidDeck once, quit, then apply again.")
+        return null
+    }
+
+    /** Selects Steam's stock gamepad layout for each controller type whose template Steam has. */
+    private fun controllerLayout(scope: String, t: Tweak): JSONObject? {
+        val templates = t.json.getJSONObject("templates")
+        val files = JSONObject()
+        for ((steam, dir) in dd.controllerConfigDirs()) {
+            for (type in templates.keys()) {
+                val template = templates.getString(type)
+                if (!Storage.isFile("$steam/controller_base/templates/$template")) continue
+                val path = "$dir/configset_$type.vdf"
+                val old = Storage.readText(path)
+                val edit = SteamSettings.setLayout(old ?: SteamSettings.EMPTY_CONFIGSET, scope, template) ?: continue
+                write(path, edit.text)
+                files.put(path, edit.prev.put("created", old == null))
+                log("  layout for $type: $template")
+            }
+        }
+        if (files.length() > 0) return JSONObject().put("layouts", files)
+        log("  No Steam controller-config folder or stock template found. Start Steam in DroidDeck once, quit, then apply again.")
+        return null
     }
 
     private fun renameFiles(install: DroidDeck.Install, t: Tweak): JSONObject {
@@ -280,7 +342,7 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
     fun revert(game: Game, pack: Pack) {
         if (!Storage.isGranted(dd.envFile)) fail("Access to DroidDeck's folder hasn't been granted yet.")
         if (appliedState(game, pack.kind) == null) fail("${pack.name} isn't applied for ${game.name}.")
-        backup(listOf(dd.envFile) + dd.localConfigs())
+        backup(listOf(dd.envFile, dd.protonGames) + dd.localConfigs())
         revertInternal(game, pack.kind)
         log("Reverted ${pack.name} for ${game.name}.")
     }
@@ -299,6 +361,29 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                         val n = files.getString(i)
                         if (Storage.rename("$dir/$n$BAK", "$dir/$n").ok) log("  restored $n")
                     }
+                } else if (t.has("protonGames")) {
+                    val root = SteamSettings.parseGames(Storage.readText(dd.protonGames)) ?: continue
+                    val games = root.getJSONObject("games")
+                    if (t.getBoolean("had")) games.put(scope, t.get("old")) else games.remove(scope)
+                    write(dd.protonGames, root.toString(1) + "\n")
+                    log("  restored Proton choice")
+                } else if (t.has("steamInput")) {
+                    val saved = t.getJSONObject("steamInput")
+                    for (cfg in saved.keys()) {
+                        val text = Storage.readText(cfg) ?: continue
+                        write(cfg, SteamSettings.restoreSteamInput(text, scope, saved.getJSONObject(cfg)))
+                    }
+                    log("  restored Steam Input setting")
+                } else if (t.has("layouts")) {
+                    val saved = t.getJSONObject("layouts")
+                    for (path in saved.keys()) {
+                        val text = Storage.readText(path) ?: continue
+                        val prev = saved.getJSONObject(path)
+                        val out = SteamSettings.restoreLayout(text, scope, prev)
+                        if (prev.optBoolean("created") && out == SteamSettings.EMPTY_CONFIGSET) Storage.deleteFile(path)
+                        else write(path, out)
+                    }
+                    log("  restored controller layout")
                 } else if (t.has("modDir")) {
                     val dir = t.getString("modDir")
                     val backupDir = File(t.getString("backupDir"))

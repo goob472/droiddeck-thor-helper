@@ -18,6 +18,7 @@ class DroidDeck(val pkg: String, val versionName: String?, val data: String = "/
         "$linuxRoot/root/.local/share/Steam",
         "$linuxRoot/root/.droiddeck-x64/.local/share/Steam",
     )
+    val protonState = "$linuxRoot/root/.local/share/droiddeck-compat/state.json"
     val protonGames = "$linuxRoot/root/.local/share/droiddeck-compat/games.json"
 
     fun withData(path: String) = DroidDeck(pkg, versionName, path.trimEnd('/'))
@@ -141,6 +142,14 @@ class DroidDeck(val pkg: String, val versionName: String?, val data: String = "/
         }
         return null
     }
+
+    /** (Steam folder, account's controller-config folder) for every account that has one. */
+    fun controllerConfigDirs(): List<Pair<String, String>> = steamRoots.flatMap { sr ->
+        val base = "$sr/steamapps/common/Steam Controller Configs"
+        runCatching { Storage.list(base) }.getOrDefault(emptyList())
+            .filter { it.isNotEmpty() && it != "0" && it.all(Char::isDigit) }
+            .map { sr to "$base/$it/config" }
+    }.filter { runCatching { Storage.isDir(it.second) }.getOrDefault(false) }
 
     /** userdata/<account>/config/localconfig.vdf for every signed-in account under both Steam clients. */
     fun localConfigs(): List<String> = steamRoots.flatMap { sr ->

@@ -39,7 +39,7 @@ class WineRegTest {
 
     @Test fun allGamesParse() {
         val games = GameDb.parse(File("src/main/assets/games.json").readText())
-        assertEquals(listOf("maneater", "mhw", "hitman_woa", "dr2", "dr2otr"), games.map { it.id })
+        assertEquals(listOf("maneater", "mhw", "hitman_woa", "dr2", "dr2otr", "disgaea2"), games.map { it.id })
         val mhw = games.first { it.id == "mhw" }
         assertEquals(582010L, mhw.steamAppId)
         assertNull(mhw.launchOptions)

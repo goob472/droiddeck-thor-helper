@@ -118,6 +118,14 @@ Forge engine, 32-bit Direct3D 9 through DXVK.
   `WINEDLLOVERRIDES=dinput8=n,b` for that game. Without it, the games only detect an official Xbox 360 pad.
   Nothing is bundled with this app, and revert removes exactly the files it added.
 
+### Disgaea 2 PC (495280)
+
+* Pins the game to DroidDeck's default Proton (`droiddeck-compat/games.json`), so the Windows build runs. The
+  Linux build reads controllers through Steam game actions and loses them for some players.
+* Forces Steam Input on (`UseSteamControllerConfig=2`) and selects Steam's stock gamepad layout, which turns
+  DroidDeck's Steam Deck pad into an Xbox pad. No keyboard mapping.
+* `PROTON_SPOOF_STEAMINPUT_VIDPID=1` gives that pad an Xbox 360 ID, on Proton builds that support it.
+
 ## Install and update with Obtainium
 
 In Obtainium, tap **Add app** and enter:

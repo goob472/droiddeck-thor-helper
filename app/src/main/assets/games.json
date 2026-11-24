@@ -367,6 +367,68 @@
           ]
         }
       ]
+    },
+    {
+      "id": "disgaea2",
+      "name": "Disgaea 2 PC",
+      "steamAppId": 495280,
+      "installDir": "Disgaea 2 PC",
+      "detectFiles": [
+        "disgaea2.exe",
+        "Disgaea2SteamOS.sh"
+      ],
+      "summary": "OpenGL 3.0, with separate Windows and Linux builds that read controllers differently.",
+      "notes": [
+        "Controller: in the developer's own Steam layout, the Linux build uses Steam's 'SteamOS or Mac' game actions and the Windows build uses an ordinary Xbox pad. ProtonDB players report the Linux build losing controllers, and one fixed it by forcing Proton.",
+        "Why turning Steam Input off didn't help: DroidDeck's default pad is a Steam Deck controller, which normally becomes an Xbox pad only through Steam Input. This profile turns it on and picks Steam's stock gamepad layout. No keys are mapped.",
+        "After applying, start Steam in DroidDeck. If the Linux build was installed, Steam downloads the Windows files. Let that finish before launching.",
+        "Don't pick another layout or turn Steam Input off for this game. Steam can also sync an old layout back from the cloud; if input stops, choose the 'Gamepad' template in the game's controller settings.",
+        "If the game doesn't launch, choose another Proton for it on DroidDeck's Components page. One ProtonDB player needed 8.0-5 on a Steam Deck."
+      ],
+      "env": {
+        "PROTON_SPOOF_STEAMINPUT_VIDPID": "1"
+      },
+      "profile": {
+        "name": "Best compatibility + performance",
+        "description": "Runs the Windows build through Proton with Steam Input on and the stock gamepad layout, so the game should see an Xbox controller. FEX uses Performance + TSO.",
+        "fex": {
+          "FEX_TSOENABLED": "1",
+          "FEX_VECTORTSOENABLED": "0",
+          "FEX_MEMCPYSETTSOENABLED": "0",
+          "FEX_HALFBARRIERTSOENABLED": "0",
+          "FEX_X87REDUCEDPRECISION": "1",
+          "FEX_MULTIBLOCK": "1"
+        }
+      },
+      "tweaks": [
+        {
+          "id": "force_proton",
+          "name": "Use the Windows build (DroidDeck's default Proton)",
+          "type": "forceProton"
+        },
+        {
+          "id": "steam_input",
+          "name": "Steam Input forced on",
+          "type": "steamInput",
+          "value": "2"
+        },
+        {
+          "id": "gamepad_layout",
+          "name": "Steam's stock gamepad layout",
+          "type": "controllerLayout",
+          "templates": {
+            "controller_neptune": "controller_neptune_gamepad_joystick.vdf",
+            "controller_xbox360": "controller_xbox360_gamepad_joystick.vdf",
+            "controller_ps4": "controller_ps4_gamepad_joystick.vdf",
+            "controller_ps5": "controller_ps5_gamepad_joystick.vdf"
+          }
+        }
+      ],
+      "ui": {
+        "name": "UI scale (in-game only)",
+        "description": "No UI scale setting found.",
+        "manual": "No UI or text scale setting was found for Disgaea 2 PC outside the game. Valve's Steam Deck test lists its interface text as legible."
+      }
     }
   ]
 }

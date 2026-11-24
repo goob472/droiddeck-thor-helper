@@ -5,6 +5,8 @@ package com.goob.ddhelper
  * rather than re-serialising, so everything it does not touch stays byte-for-byte the same.
  */
 object Vdf {
+    private val NL = Char(10)
+
     private class Node(
         val key: String,
         val keyStart: Int,
@@ -103,7 +105,7 @@ object Vdf {
         val (insertAt, indent) = closingIndent(t, parent)
         val ind = indent + "\t"
         val block = "$ind\"${escape(key)}\"$nl$ind{$nl$ind}$nl"
-        return if (insertAt == parent.valueEnd) t.substring(0, insertAt) + nl + block + t.substring(insertAt)
+        return if (insertAt == parent.valueEnd && t[insertAt - 1] != NL) t.substring(0, insertAt) + nl + block + t.substring(insertAt)
         else t.substring(0, insertAt) + block + t.substring(insertAt)
     }
 
@@ -126,7 +128,7 @@ object Vdf {
         }
         val (insertAt, indent) = closingIndent(text, s)
         val line = "$indent\t\"${escape(key)}\"\t\t$quoted$nl"
-        return if (insertAt == s.valueEnd) text.substring(0, insertAt) + nl + line + text.substring(insertAt)
+        return if (insertAt == s.valueEnd && text[insertAt - 1] != NL) text.substring(0, insertAt) + nl + line + text.substring(insertAt)
         else text.substring(0, insertAt) + line + text.substring(insertAt)
     }
 
@@ -139,6 +141,16 @@ object Vdf {
         val alone = t.substring(lineStart, e.keyStart).isBlank() && t.substring(e.valueEnd + 1, lineEnd).isBlank()
         return if (alone) t.removeRange(lineStart, if (lineEnd < t.length) lineEnd + 1 else lineEnd)
         else t.removeRange(e.keyStart, e.valueEnd + 1)
+    }
+
+    /** Removes a section that has nothing in it; anything else is left alone. */
+    fun removeEmptySection(t: String, sectionPath: List<String>): String {
+        val s = find(t, sectionPath) ?: return t
+        if (t.substring(s.valueStart + 1, s.valueEnd).isNotBlank()) return t
+        val lineStart = t.lastIndexOf('\n', s.keyStart) + 1
+        val from = if (t.substring(lineStart, s.keyStart).isBlank()) lineStart else s.keyStart
+        val lineEnd = t.indexOf('\n', s.valueEnd).let { if (it < 0) t.length else it + 1 }
+        return t.removeRange(from, if (t.substring(s.valueEnd + 1, lineEnd).isBlank()) lineEnd else s.valueEnd + 1)
     }
 
     /** All string values named [key] anywhere in the file (used for libraryfolders "path"). */
