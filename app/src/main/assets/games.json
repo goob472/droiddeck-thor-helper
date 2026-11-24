@@ -383,6 +383,8 @@
       ],
       "summary": "OpenGL 3.0, with separate Windows and Linux builds that read controllers differently.",
       "notes": [
+        "Screen not filled: in the game, open Settings > PC Settings > Screen Size and choose Fullscreen A (borderless), or Fullscreen B if A doesn't fill it. This has to be set in the game once; Update keeps it, but Revert restores the old game.cfg.",
+        "Speed: the game is capped at 60 fps by design. If it crashes or shows glitches after this update, set FEX_TSOENABLED=1 or remove ZINK_DESCRIPTORS in DroidDeck's Game environment. Also check that no fps limit is set in Steam's Quick Access or DroidDeck.",
         "Buttons wrong: this resets game.cfg, where a Steam player found broken input settings (deleting it fixed the game for that player). Saves are not touched; display and other PC settings return to defaults. If buttons are still wrong, check Settings > PC Settings > Key Configuration in the game's menu.",
         "Controller: in the developer's own Steam layout, the Linux build uses Steam's 'SteamOS or Mac' game actions and the Windows build uses an ordinary Xbox pad. ProtonDB players report the Linux build losing controllers, and one fixed it by forcing Proton.",
         "Why turning Steam Input off didn't help: DroidDeck's default pad is a Steam Deck controller, which normally becomes an Xbox pad only through Steam Input. This profile turns it on and picks Steam's stock gamepad layout. No keys are mapped.",
@@ -391,13 +393,17 @@
         "If the game doesn't launch, choose another Proton for it on DroidDeck's Components page. One ProtonDB player needed 8.0-5 on a Steam Deck."
       ],
       "env": {
-        "PROTON_SPOOF_STEAMINPUT_VIDPID": "1"
+        "PROTON_SPOOF_STEAMINPUT_VIDPID": "1",
+        "ZINK_DESCRIPTORS": "auto",
+        "ZINK_DEBUG": null,
+        "mesa_glthread": "true",
+        "vblank_mode": "0"
       },
       "profile": {
         "name": "Best compatibility + performance",
-        "description": "Runs the Windows build through Proton with Steam Input on and the stock gamepad layout, so the game should see an Xbox controller. FEX uses Performance + TSO.",
+        "description": "Runs the Windows build through Proton with Steam Input on and the stock gamepad layout, so the game should see an Xbox controller. FEX uses Performance (no TSO), and OpenGL uses Zink's own descriptor mode instead of DroidDeck's lazy one, for speed.",
         "fex": {
-          "FEX_TSOENABLED": "1",
+          "FEX_TSOENABLED": "0",
           "FEX_VECTORTSOENABLED": "0",
           "FEX_MEMCPYSETTSOENABLED": "0",
           "FEX_HALFBARRIERTSOENABLED": "0",
