@@ -379,6 +379,7 @@
       ],
       "summary": "OpenGL 3.0, with separate Windows and Linux builds that read controllers differently.",
       "notes": [
+        "Buttons wrong: this resets game.cfg, where a Steam player found broken input settings (deleting it fixed the game for that player). Saves are not touched; display and other PC settings return to defaults. If buttons are still wrong, check Settings > PC Settings > Key Configuration in the game's menu.",
         "Controller: in the developer's own Steam layout, the Linux build uses Steam's 'SteamOS or Mac' game actions and the Windows build uses an ordinary Xbox pad. ProtonDB players report the Linux build losing controllers, and one fixed it by forcing Proton.",
         "Why turning Steam Input off didn't help: DroidDeck's default pad is a Steam Deck controller, which normally becomes an Xbox pad only through Steam Input. This profile turns it on and picks Steam's stock gamepad layout. No keys are mapped.",
         "After applying, start Steam in DroidDeck. If the Linux build was installed, Steam downloads the Windows files. Let that finish before launching.",
@@ -411,6 +412,12 @@
           "name": "Steam Input forced on",
           "type": "steamInput",
           "value": "2"
+        },
+        {
+          "id": "reset_game_cfg",
+          "name": "Reset the game's saved button map (game.cfg)",
+          "type": "resetFile",
+          "file": "game.cfg"
         },
         {
           "id": "gamepad_layout",

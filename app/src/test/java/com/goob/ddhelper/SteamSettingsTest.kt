@@ -49,7 +49,10 @@ class SteamSettingsTest {
     @Test fun disgaea2UsesNativeControllerNotKeys() {
         val g = GameDb.parse(File("src/main/assets/games.json").readText()).first { it.id == "disgaea2" }
         assertEquals(495280L, g.steamAppId)
-        assertEquals(listOf("forceProton", "steamInput", "controllerLayout"), g.tweaks.map { it.type })
+        assertEquals(listOf("forceProton", "steamInput", "resetFile", "controllerLayout"), g.tweaks.map { it.type })
         assertEquals("2", g.tweaks[1].json.getString("value"))
+        assertEquals("game.cfg", g.tweaks[2].json.getString("file"))
+        assertEquals("a=1", Applier.preview("a=1".toByteArray()))
+        assertEquals("00 ff", Applier.preview(byteArrayOf(0, -1)))
     }
 }

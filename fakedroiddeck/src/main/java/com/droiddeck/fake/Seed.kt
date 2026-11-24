@@ -44,6 +44,11 @@ object Seed {
             "Width = 1280\r\nHeight = 720\r\nUseMultiCore = true\r\n",
         )
 
+        // Disgaea 2: complete, with a game.cfg to reset.
+        manifest(495280, "Disgaea 2 PC")
+        put("steamapps/common/Disgaea 2 PC/disgaea2.exe", "MZ fake")
+        put("steamapps/common/Disgaea 2 PC/game.cfg", "old map")
+
         // HITMAN: Steam has a manifest, but the game files are incomplete (no executable).
         manifest(1659040, "HITMAN 3")
         put("steamapps/common/HITMAN 3/Launcher.exe", "MZ fake")

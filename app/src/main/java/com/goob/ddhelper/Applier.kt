@@ -51,14 +51,24 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         if (!Storage.isGranted(dd.envFile)) fail("Access to DroidDeck's folder hasn't been granted yet.")
         if (dd.findInstall(game) == null) fail("${game.name} isn't installed in DroidDeck, so nothing was changed.")
         backup(listOf(dd.envFile, dd.protonGames) + dd.localConfigs())
+        // Files reset by an earlier apply stay reset: the game has written its own new one since.
+        var carried = emptyMap<String, JSONObject>()
         if (appliedState(game, pack.kind) != null) {
             log("${pack.name} is already applied. Reverting it first so it starts from your own settings.")
-            revertInternal(game, pack.kind)
+            carried = appliedState(game, pack.kind)?.optJSONObject("tweaks")?.let { old ->
+                old.keys().asSequence().filter { old.getJSONObject(it).has("resetPath") && pack.tweaks.any { t -> t.id == it } }
+                    .associateWith { old.getJSONObject(it) }
+            }.orEmpty()
+            revertInternal(game, pack.kind, keep = carried.keys)
         }
         val state = JSONObject()
             .put("game", game.id).put("kind", pack.kind).put("profile", pack.name).put("pkg", dd.pkg)
             .put("appliedAt", System.currentTimeMillis()).put("fingerprint", pack.fingerprint())
         val scope = game.steamAppId.toString()
+        val tweaksState = JSONObject()
+        carried.forEach { (id, record) -> tweaksState.put(id, record) }
+        state.put("tweaks", tweaksState)
+        stateFile(game, pack.kind).writeText(state.toString(2))
 
         // 1. Per-game environment (FEX preset + fixes).
         val entries = pack.env
@@ -103,7 +113,6 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
             if (install == null) log("${game.name} is not installed in any Steam library DroidDeck uses. Skipping game-file tweaks.")
             else log("Found ${game.name} at ${install.gameDir}")
         }
-        val tweaksState = JSONObject()
         val missed = ArrayList<String>()
         for (t in pack.tweaks) {
             if (install == null) break
@@ -121,6 +130,8 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                         }
                         if (done == null) missed += t.name else tweaksState.put(t.id, done)
                     }
+                    "resetFile" -> if (t.id in carried) log("  ${t.name}: already done, keeping the file the game has now.")
+                    else resetFile(game, install, t) { tweaksState.put(t.id, it); stateFile(game, pack.kind).writeText(state.put("tweaks", tweaksState).toString(2)) }
                     "modZip" -> modZip(game, install, t)?.let { tweaksState.put(t.id, it) }
                     else -> log("Unknown tweak type ${t.type}")
                 }
@@ -202,6 +213,25 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         }
         if (renamed.length() == 0) log("  ${t.name}: nothing to rename in $dir")
         return JSONObject().put("dir", dir).put("files", renamed)
+    }
+
+    /**
+     * Removes one settings file the game writes itself, so it starts from its defaults. The original
+     * is saved in this app and [record]ed before anything is deleted; revert puts it back.
+     */
+    private fun resetFile(game: Game, install: DroidDeck.Install, t: Tweak, record: (JSONObject) -> Unit) {
+        val rel = t.json.getString("file")
+        val path = dd.resolveIgnoringCase(install.gameDir, rel)
+        if (path == null) {
+            log("  ${t.name}: no $rel in the game folder, nothing to reset."); return
+        }
+        val bytes = Storage.readBytes(path) ?: fail("could not read $rel, so it was left alone")
+        val saved = File(ctx.filesDir, "reset-backups/${game.id}/${t.id}").apply { parentFile?.mkdirs() }
+        saved.writeBytes(bytes)
+        record(JSONObject().put("resetPath", path).put("saved", saved.absolutePath))
+        val r = Storage.deleteFile(path)
+        if (!r.ok) fail("could not remove $rel: ${r.err}")
+        log("  reset $rel (${bytes.size} bytes saved); the game writes a new one")
     }
 
     private fun iniPath(install: DroidDeck.Install, raw: String): String? = when {
@@ -347,14 +377,25 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         log("Reverted ${pack.name} for ${game.name}.")
     }
 
-    private fun revertInternal(game: Game, kind: String) {
+    private fun revertInternal(game: Game, kind: String, keep: Set<String> = emptySet()) {
         val state = appliedState(game, kind) ?: return
         val scope = game.steamAppId.toString()
 
         state.optJSONObject("tweaks")?.let { tweaks ->
             for (id in tweaks.keys().asSequence().toList().asReversed()) {
+                if (id in keep) continue
                 val t = tweaks.getJSONObject(id)
-                if (t.has("files")) {
+                if (t.has("resetPath")) {
+                    val path = t.getString("resetPath")
+                    val saved = File(t.getString("saved"))
+                    // The install may be gone; don't recreate its folder just to hold this file.
+                    if (saved.isFile && Storage.isDir(path.substringBeforeLast('/'))) {
+                        val r = Storage.writeBytes(path, saved.readBytes())
+                        if (!r.ok) fail("Could not restore $path: ${r.err}")
+                        log("  restored ${path.substringAfterLast('/')}")
+                        saved.delete()
+                    }
+                } else if (t.has("files")) {
                     val dir = t.getString("dir")
                     val files = t.getJSONArray("files")
                     for (i in 0 until files.length()) {
@@ -478,6 +519,22 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
         val install = dd.findInstall(game)
         sb.appendLine("Install: " + (install?.gameDir ?: "not found"))
         if (install != null) sb.appendLine("Proton prefix: " + (install.prefix ?: "not created yet (launch once)"))
+        for (t in game.settings.tweaks) {
+            if (t.type == "controllerLayout") for ((_, dir) in dd.controllerConfigDirs()) {
+                for (f in Storage.list(dir).filter { it.startsWith("configset_") && it.endsWith(".vdf") }) {
+                    val text = Storage.readText("$dir/$f") ?: continue
+                    val used = SteamSettings.LAYOUT_KEYS.mapNotNull { k ->
+                        Vdf.get(text, listOf("controller_config", scope), k)?.let { "$k $it" }
+                    }
+                    if (used.isNotEmpty()) sb.appendLine("Layout (${f.removePrefix("configset_").removeSuffix(".vdf")}): ${used.joinToString()}")
+                }
+            }
+            if (t.type == "resetFile" && install != null) {
+                val rel = t.json.getString("file")
+                val bytes = dd.resolveIgnoringCase(install.gameDir, rel)?.let { Storage.readBytes(it) }
+                sb.appendLine("$rel: " + if (bytes == null) "not there" else "${bytes.size} bytes\n" + preview(bytes))
+            }
+        }
         for (p in game.packs) {
             val label = p.short.replaceFirstChar { it.uppercase() }
             sb.appendLine("$label: " + if (p.manual != null) "in-game only" else if (appliedState(game, p.kind) != null) "APPLIED" else "not applied")
@@ -487,6 +544,15 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
 
     companion object {
         const val BAK = ".ddhbak"
+
+        /** A settings file for the details view: as text if it is text, otherwise as hex. */
+        fun preview(bytes: ByteArray, max: Int = 2048): String {
+            val head = bytes.copyOf(minOf(bytes.size, max))
+            val isText = head.all { it >= 32 || it == 9.toByte() || it == 10.toByte() || it == 13.toByte() }
+            val out = if (isText) head.toString(Charsets.UTF_8)
+            else head.toList().chunked(16).joinToString("\n") { row -> row.joinToString(" ") { "%02x".format(it) } }
+            return out + if (bytes.size > max) "\n(first $max bytes)" else ""
+        }
 
         /** Adds the template's arguments to whatever the user already has, without duplicating any. */
         fun mergeLaunchOptions(existing: String?, template: String): String {

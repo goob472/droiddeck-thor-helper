@@ -125,6 +125,8 @@ Forge engine, 32-bit Direct3D 9 through DXVK.
 * Forces Steam Input on (`UseSteamControllerConfig=2`) and selects Steam's stock gamepad layout, which turns
   DroidDeck's Steam Deck pad into an Xbox pad. No keyboard mapping.
 * `PROTON_SPOOF_STEAMINPUT_VIDPID=1` gives that pad an Xbox 360 ID, on Proton builds that support it.
+* Resets `game.cfg` in the game folder once, in case it holds a wrong button map (revert restores it). Saves are
+  not touched. **Details** shows the current `game.cfg` and the layout Steam has selected.
 
 ## Install and update with Obtainium
 
