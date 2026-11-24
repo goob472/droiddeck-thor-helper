@@ -189,10 +189,11 @@
         "-skip_launcher goes straight into the game. On Proton the IOI launcher often fails, or doesn't take controller input, and several ProtonDB players say the game would not start without it.",
         "VKD3D_CONFIG=nodxr hides DirectX Raytracing from the game. ProtonDB reports consistently tie freezes within minutes of starting a mission to ray tracing, and the Adreno 740 can't afford it anyway.",
         "VKD3D_FEATURE_LEVEL=12_1 goes with nodxr. DroidDeck issue #1293 shows HITMAN still crashes at startup when an older DroidDeck setup forces feature level 12_2, which advertises ray tracing the Adreno GPU can't run. 12_1 keeps it hidden.",
-        "VKD3D_FRAME_RATE=30 caps the game at a steady 30 fps. Several players found that capping the frame rate cut down hard freezes on loads and picture-in-picture, and under FEX the Thor won't hold much more in big levels like Marrakesh or Mumbai. Remove it in DroidDeck's Game environment if you want to experiment.",
+        "30 fps comes from VKD3D_FRAME_RATE=30 only. Turn V-Sync off in the game, and leave DroidDeck's and Steam's own fps limits off: Steam Deck players report severe camera judder in this game when it is capped by the system limiter, and some also with in-game V-Sync.",
         "FEX uses DroidDeck's Performance + TSO preset. Glacier is heavily multithreaded and needs main TSO to avoid deadlocks.",
-        "Render scale is set to 75% through the game's SuperSampling registry value. This only works after the game has run once, so launch once, quit, and apply again if the log says the value isn't set yet. Changing graphics in the game can reset it.",
-        "Set graphics to Low or Medium in the game's options, with ray tracing off and no frame generation. The first mission load compiles shaders and takes a while.",
+        "Render scale 75% and lowest textures and shadows go through the game's registry values (SuperSampling, TextureResolution, ShadowQuality). Only values the game already wrote are changed, so launch it once first. Changing graphics in the game resets them; check that textures and shadows read Low there.",
+        "Stutter: in the game, set Mirrors Reflection Quality to Off, Reflection Quality and Level of Detail to Low, SSAO Off or Low, Simulation Quality to Base, ray tracing and frame generation off. Players fixed hitching with Low textures, Base simulation, or lower reflections. New areas still hitch while shaders compile the first time.",
+        "If it still hitches: update DroidDeck to 0.7.1 or newer (it fixed long freezes every 30 seconds on devices with 13 GB of RAM or less). If only walking stutters, not the camera, set a deadzone on the left stick in Steam's controller layout.",
         "Progression needs IOI's servers. If you get disconnected mid-mission, use Retry. Offline saves are separate from online ones.",
         "Known, unsolved in DroidDeck (#1293): in the Guided Training tutorial, the 'Hold A to disguise yourself' step can ignore input forever. If it happens, skip the tutorial or restart the mission."
       ],
@@ -200,11 +201,12 @@
       "env": {
         "VKD3D_CONFIG": "nodxr",
         "VKD3D_FEATURE_LEVEL": "12_1",
-        "VKD3D_FRAME_RATE": "30"
+        "VKD3D_FRAME_RATE": "30",
+        "MESA_SHADER_CACHE_MAX_SIZE": "4G"
       },
       "profile": {
         "name": "Best compatibility + performance",
-        "description": "FEX Performance + TSO, ray tracing hidden at feature level 12_1, 30 fps cap, launcher skipped, 75% render scale.",
+        "description": "30 fps target with low texture and shadow load against stutter. FEX Performance + TSO, ray tracing hidden at feature level 12_1, 75% render scale, larger shader cache, launcher skipped.",
         "fex": {
           "FEX_TSOENABLED": "1",
           "FEX_VECTORTSOENABLED": "0",
@@ -217,12 +219,14 @@
       "tweaks": [
         {
           "id": "hitman_scale",
-          "name": "75% render scale (registry SuperSampling)",
+          "name": "75% render scale, lowest textures and shadows (registry)",
           "type": "wineReg",
           "path": "pfx:user.reg",
           "key": "Software\\IO Interactive\\HITMAN3",
           "numbers": {
-            "SuperSampling": 750
+            "SuperSampling": 750,
+            "TextureResolution": 0,
+            "ShadowQuality": 0
           }
         }
       ],

@@ -529,6 +529,11 @@ class Applier(private val ctx: Context, private val dd: DroidDeck, private val l
                     if (used.isNotEmpty()) sb.appendLine("Layout (${f.removePrefix("configset_").removeSuffix(".vdf")}): ${used.joinToString()}")
                 }
             }
+            if (t.type == "wineReg" && install != null) {
+                val text = iniPath(install, t.json.getString("path"))?.let { Storage.readText(it) }
+                val values = text?.let { WineReg.numbers(it, t.json.getString("key")) }.orEmpty()
+                sb.appendLine("Registry values: " + if (values.isEmpty()) "none yet (launch once)" else "\n  " + values.joinToString("\n  "))
+            }
             if (t.type == "resetFile" && install != null) {
                 val rel = t.json.getString("file")
                 val bytes = dd.resolveIgnoringCase(install.gameDir, rel)?.let { Storage.readBytes(it) }

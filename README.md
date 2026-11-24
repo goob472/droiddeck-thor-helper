@@ -96,7 +96,9 @@ Glacier 2, Direct3D 12 only (VKD3D-Proton), no Denuvo.
 * Launch options `%command% -skip_launcher`.
 * `VKD3D_CONFIG=nodxr` with `VKD3D_FEATURE_LEVEL=12_1` hides ray tracing, the main cause of freezes and
   a startup crash under Proton (DroidDeck #1293). `VKD3D_FRAME_RATE=30`
-  caps the frame rate for stability.
+  caps the frame rate; in-game V-Sync and system fps limits should stay off (camera judder on Steam Deck).
+* Against stutter: `TextureResolution` and `ShadowQuality` lowered in the registry, a 4 GB Mesa shader cache, and
+  in-game advice for settings with no known registry name. **Details** lists the game's registry values.
 * FEX: Performance + TSO.
 * Render scale is set to 75% through the `SuperSampling` registry value in the prefix's `user.reg`.
   Only values the game already wrote are changed, keeping their type.

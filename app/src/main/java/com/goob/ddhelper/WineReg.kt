@@ -44,6 +44,14 @@ object WineReg {
         return lines.joinToString("\n")
     }
 
+    /** The numeric values of a key as "name = value" lines, for showing. Other types are left out. */
+    fun numbers(text: String, keyPath: String): List<String> {
+        val lines = text.split("\n")
+        val r = section(lines, keyPath) ?: return emptyList()
+        return r.mapNotNull { Regex("^\"([^\"]+)\"=(dword:[0-9a-fA-F]{8}|\"-?[0-9.]{1,8}\")\\r?$").find(lines[it]) }
+            .map { "${it.groupValues[1]} = ${it.groupValues[2].trim('"')}" }
+    }
+
     /** A number encoded with the same type as [oldRhs], or null for types this helper won't touch. */
     fun numberLike(oldRhs: String, n: Long): String? = when {
         oldRhs.startsWith("dword:", ignoreCase = true) -> "dword:%08x".format(n)

@@ -17,6 +17,8 @@ class WineRegTest {
         assertEquals("\"1000\"", WineReg.getRaw(reg, key, "SuperSampling"))
         val s = WineReg.setRaw(reg, key, "SuperSampling", WineReg.numberLike("\"1000\"", 750)!!)!!
         assertEquals("\"750\"", WineReg.getRaw(s, key, "SuperSampling"))
+        assertEquals(listOf("SharpeningStrength = dword:00000002", "SuperSampling = 1000"), WineReg.numbers(reg, key))
+        assertEquals(2, WineReg.numbers(reg.replace("\n", "\r\n"), key).size)
         // The same name in another key is untouched.
         assertEquals("\"1\"", WineReg.getRaw(s, "Software\\Wine", "SuperSampling"))
         assertEquals("dword:000002ee", WineReg.numberLike("dword:00000002", 750))
@@ -52,6 +54,10 @@ class WineRegTest {
         assertEquals("%command% -skip_launcher", hitman.launchOptions)
         assertEquals("nodxr", GameDb.environment(hitman)["VKD3D_CONFIG"])
         assertEquals(key, hitman.tweaks.single().json.getString("key"))
+        assertEquals("30", GameDb.environment(hitman)["VKD3D_FRAME_RATE"])
+        val lowered = hitman.tweaks.single().json.getJSONObject("numbers")
+        assertEquals(750, lowered.getInt("SuperSampling"))
+        assertEquals(0, lowered.getInt("TextureResolution"))
     }
 
     @Test fun uiPacksParseAndStaySeparateFromSettings() {
